@@ -5,7 +5,6 @@ use std::io::BufRead;
 use std::fs::File;
 use std::net::UdpSocket;
 use log::{
-    info,
     warn,
     error,
     debug,
@@ -21,7 +20,6 @@ use mqtt_sn_tools_rs::mqttsn::constants::{
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::mqtt_sn_send_disconnect;
-use mqtt_sn_tools_rs::mqttsn::settings;
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
     default_settings,
@@ -36,9 +34,7 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_receive_regack,
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
-    mqtt_sn_create_connection
-};
+use mqtt_sn_tools_rs::mqttsn::network_abstractions::mqtt_sn_create_connection;
 
 
 fn usage() {
