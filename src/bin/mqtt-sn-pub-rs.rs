@@ -16,10 +16,10 @@ use mqtt_sn_tools_rs::mqttsn::constants::{
     MQTT_SN_MAX_PAYLOAD_LENGTH, 
     MQTT_SN_TOPIC_TYPE_NORMAL, 
     MQTT_SN_TOPIC_TYPE_PREDEFINED, 
-    MQTT_SN_TOPIC_TYPE_SHORT
+    MQTT_SN_TOPIC_TYPE_SHORT,
+    MQTT_SN_CONNACK,
 };
 
-use mqtt_sn_tools_rs::mqttsn::pubsub::mqtt_sn_send_disconnect;
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
     default_settings,
@@ -29,7 +29,8 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_send_publish,
     mqtt_sn_send_connect,
     mqtt_sn_send_register,
-    mqtt_sn_receive_connack,
+    mqtt_sn_wait_for,
+    mqtt_sn_send_disconnect,
     mqtt_sn_receive_disconnect,
     mqtt_sn_receive_regack,
 };
@@ -259,7 +260,7 @@ fn main(){
     if settings.qos >= 0 {
         // Send a CONNECT message
         mqtt_sn_send_connect(&socket, &settings, true);
-        mqtt_sn_receive_connack(&socket);
+        mqtt_sn_wait_for(&socket, MQTT_SN_CONNACK, &settings);
         
         // Then check if the topic is a pre-defined topic ID
         if settings.topic_id != 0 {
