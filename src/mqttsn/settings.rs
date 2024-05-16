@@ -37,6 +37,10 @@ pub struct Settings {
     pub topic: String,
     pub verbose: bool,
     pub topic_map: HashMap<u16, String>,
+    pub loop_frequency: u64,
+    pub loop_count: u64,
+    pub single_message: bool,
+    pub clean_session: bool,
 }
 
 
@@ -72,6 +76,10 @@ pub fn default_settings() -> Settings {
         verbose: false,
         topic: String::from(""),
         topic_map: HashMap::new(),
+        loop_frequency: 0,
+        loop_count: 0,
+        clean_session: true,
+        single_message: false,
     }
 }
 
