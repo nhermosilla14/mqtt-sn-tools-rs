@@ -211,6 +211,11 @@ pub fn mqtt_sn_wait_for(
                 //let pingresp = packet.as_pingresp().unwrap();
                 info!("Received PINGRESP packet.");
             }
+            // Connack
+            MQTT_SN_CONNACK => {
+                //let connack = packet.as_connack().unwrap();
+                info!("Received CONNACK packet.");
+            }
             _ => {
                 println!(
                     "Was expecting {} packet but received {}",
