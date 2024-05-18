@@ -27,7 +27,11 @@ use crate::mqttsn::constants::{
     MQTT_SN_PUBLISH,
     MQTT_SN_REGACK,
     MQTT_SN_REGISTER,
-    //MQTT_SN_SUBSCRIBE
+    MQTT_SN_SUBACK,
+    MQTT_SN_SUBSCRIBE,
+    MQTT_SN_TOPIC_TYPE_NORMAL,
+    MQTT_SN_TOPIC_TYPE_PREDEFINED,
+    MQTT_SN_TOPIC_TYPE_SHORT,
 };
 
 use crate::mqttsn::packet_types::{
@@ -43,15 +47,14 @@ use crate::mqttsn::packet_types::{
     PublishPacket,
     RegackPacket,
     RegisterPacket,
+    SubackPacket,
+    SubscribePacket,
+    Topic,
 };
 
 use crate::mqttsn::settings::{
-    get_next_message_id,
-    get_topic_id,
-    reset_message_id,
-    set_topic_id,
-    set_wireless_node_id,
-    Settings,
+    get_last_message_id, get_next_message_id, get_qos_flag, get_topic_id, reset_message_id,
+    set_topic_id, set_wireless_node_id, Settings,
 };
 
 // Generic send and receive functions
@@ -146,8 +149,8 @@ pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Box<dyn Packet> {
         //MQTT_SN_PUBCOMP => Box::new(PubcompPacket::from_bytes(buffer)),
         //MQTT_SN_PUBREC => Box::new(PubrecPacket::from_bytes(buffer)),
         //MQTT_SN_PUBREL => Box::new(PubrelPacket::from_bytes(buffer)),
-        //MQTT_SN_SUBSCRIBE => Box::new(SubscribePacket::from_bytes(buffer)),
-        //MQTT_SN_SUBACK => Box::new(SubackPacket::from_bytes(buffer)),
+        MQTT_SN_SUBSCRIBE => Box::new(SubscribePacket::from_bytes(buffer)),
+        MQTT_SN_SUBACK => Box::new(SubackPacket::from_bytes(buffer)),
         //MQTT_SN_UNSUBSCRIBE => Box::new(UnsubscribePacket::from_bytes(buffer)),
         //MQTT_SN_UNSUBACK => Box::new(UnsubackPacket::from_bytes(buffer)),
         MQTT_SN_PINGREQ => Box::new(PingreqPacket::from_bytes(buffer)),
@@ -170,12 +173,14 @@ pub fn mqtt_sn_wait_for(
     // Save current time to calculate next keep alive
     let start = std::time::Instant::now();
     let mut last_transmission = start.clone();
+    debug!("Start waiting for {} packet", mqtt_sn_packet_type_to_str(packet_type));
 
     loop {
         if settings.keep_alive > 0
             && last_transmission.elapsed().as_secs() >= settings.keep_alive as u64
         {
             // Send a PINGREQ packet
+            debug!("Sending PINGREQ packet");
             mqtt_sn_send_pingreq(socket);
             last_transmission = std::time::Instant::now();
         }
@@ -186,11 +191,11 @@ pub fn mqtt_sn_wait_for(
         match packet.msg_type() {
             // Publish
             MQTT_SN_PUBLISH => {
-                debug!("Received PUBLISH packet.");
+                info!("Received PUBLISH packet.");
             }
             // Puback
             MQTT_SN_PUBACK => {
-                debug!("Received PUBACK packet.");
+                info!("Received PUBACK packet.");
             }
             // Disconnect
             MQTT_SN_DISCONNECT => {
@@ -204,7 +209,7 @@ pub fn mqtt_sn_wait_for(
             // Register
             MQTT_SN_REGISTER => {
                 //let register = packet.as_register().unwrap();
-                debug!("Received REGISTER packet.");
+                info!("Received REGISTER packet.");
             }
             // Pingresp
             MQTT_SN_PINGRESP => {
@@ -216,8 +221,18 @@ pub fn mqtt_sn_wait_for(
                 //let connack = packet.as_connack().unwrap();
                 info!("Received CONNACK packet.");
             }
+            // Regack
+            MQTT_SN_REGACK => {
+                //let regack = packet.as_regack().unwrap();
+                info!("Received REGACK packet.");
+            }
+            // Suback
+            MQTT_SN_SUBACK => {
+                //let suback = packet.as_suback().unwrap();
+                info!("Received SUBACK packet.");
+            }
             _ => {
-                println!(
+                warn!(
                     "Was expecting {} packet but received {}",
                     mqtt_sn_packet_type_to_str(packet_type),
                     mqtt_sn_packet_type_to_str(packet.msg_type())
@@ -227,6 +242,7 @@ pub fn mqtt_sn_wait_for(
 
         // Check if the packet is the expected type
         if packet.msg_type() == packet_type {
+            debug!("Received expected packet: {:?}", packet);
             return Some(packet);
         }
 
@@ -329,7 +345,6 @@ pub fn mqtt_sn_receive_packet(socket: &UdpSocket) -> Box<dyn Packet> {
     let packet: Box<dyn Packet> = mqtt_sn_rebuild_packet(&buffer.to_vec());
     // Return the packet
     packet
-    //mqtt_receive_frwdencap_packet(socket)
 }
 
 // Specific send and receive functions
@@ -368,9 +383,8 @@ pub fn mqtt_sn_send_connect(socket: &UdpSocket, settings: &Settings, clean_sessi
     mqtt_sn_send_packet(socket, &packet);
 }
 
-pub fn mqtt_sn_receive_connack(socket: &UdpSocket) {
-    let packet = mqtt_sn_receive_packet(socket);
-    info!("Received CONNACK packet: {:?}", packet);
+pub fn mqtt_sn_receive_connack(socket: &UdpSocket, settings: &Settings) {
+    mqtt_sn_wait_for(socket, MQTT_SN_CONNACK, settings);
 }
 
 pub fn mqtt_sn_send_register(socket: &UdpSocket, settings: &Settings) {
@@ -405,17 +419,110 @@ pub fn mqtt_sn_send_register(socket: &UdpSocket, settings: &Settings) {
     mqtt_sn_send_packet(socket, &packet);
 }
 
-pub fn mqtt_sn_receive_regack(socket: &UdpSocket) -> RegackPacket {
-    let packet = mqtt_sn_receive_packet(socket);
-    info!("Received REGACK packet: {:?}", packet);
+pub fn mqtt_sn_receive_regack(socket: &UdpSocket, settings: &Settings) -> RegackPacket {
+    let packet = mqtt_sn_wait_for(socket, MQTT_SN_REGACK, settings);
 
-    if let Some(regack) = packet.as_regack() {
+    if let Some(regack) = packet.unwrap().as_regack() {
         debug!("Updated topic ID: {}", regack.topic_id);
         let reordered = regack.topic_id.to_be();
         set_topic_id(reordered);
         regack.clone()
     } else {
         panic!("Received packet is not a REGACK packet");
+    }
+}
+
+pub fn mqtt_sn_send_subscribe_topic_name(socket: &UdpSocket, settings: &Settings, topic: &str) {
+    // Check topic name length
+    if topic.len() > MQTT_SN_MAX_TOPIC_LENGTH {
+        panic!(
+            "Topic name is too long. Maximum length is {}",
+            MQTT_SN_MAX_TOPIC_LENGTH
+        );
+    }
+
+    let msg_type = MQTT_SN_SUBSCRIBE;
+    let message_id = get_next_message_id();
+    let mut flags = 0;
+    flags |= get_qos_flag(settings.qos);
+
+    // Copy the topic name into the packet
+    let topic_name: Topic = Topic::TopicName(topic.as_bytes().to_vec());
+
+    let length = 5 + topic.len() as u8;
+    // Get the packet length
+    if topic.len() == 2 {
+        // Short topic name
+        flags |= MQTT_SN_TOPIC_TYPE_SHORT;
+    } else {
+        // Normal topic name
+        flags |= MQTT_SN_TOPIC_TYPE_NORMAL;
+    }
+
+    // Assemble the packet
+    let packet = SubscribePacket {
+        length,
+        msg_type,
+        flags,
+        message_id,
+        topic: topic_name,
+    };
+
+    info!("Sending SUBSCRIBE packet: {:?}", packet);
+    mqtt_sn_send_packet(socket, &packet);
+}
+
+pub fn mqtt_sn_send_subscribe_topic_id(socket: &UdpSocket, settings: &Settings, topic_id: u16) {
+    let msg_type = MQTT_SN_SUBSCRIBE;
+    let message_id = get_next_message_id();
+    let mut flags = 0;
+    flags |= MQTT_SN_TOPIC_TYPE_PREDEFINED;
+    flags |= get_qos_flag(settings.qos);
+
+    // Copy the topic ID into the packet
+    let topic: Topic = Topic::TopicId(topic_id);
+
+    // Get the packet length
+    let length = 0x05 + 2;
+
+    // Assemble the packet
+    let packet = SubscribePacket {
+        length,
+        msg_type,
+        flags,
+        message_id,
+        topic,
+    };
+
+    info!("Sending SUBSCRIBE packet: {:?}", packet);
+    mqtt_sn_send_packet(socket, &packet);
+}
+
+pub fn mqtt_sn_receive_suback(socket: &UdpSocket, settings: &Settings) -> u16 {
+    let packet = mqtt_sn_wait_for(socket, MQTT_SN_SUBACK, settings);
+
+    if let Some(suback) = packet.unwrap().as_suback() {
+        debug!("Received SUBACK packet: {:?}", suback);
+        // Check the returned code
+        if suback.return_code != 0 {
+            error!("SUBACK failed with return code: {}", suback.return_code);
+            return 0;
+        } else {
+            // Check message ID
+            if suback.message_id != get_last_message_id() {
+                error!(
+                    "Received SUBACK with unexpected message ID: {}",
+                    suback.message_id
+                );
+                return 0;
+            } else {
+                info!("SUBACK successful");
+                info!("Topic ID: {}", suback.topic_id);
+                suback.topic_id
+            }
+        }
+    } else {
+        panic!("Received packet is not a SUBACK packet");
     }
 }
 
@@ -443,10 +550,8 @@ pub fn mqtt_sn_send_disconnect(socket: &UdpSocket, settings: &Settings) {
     }
 }
 
-pub fn mqtt_sn_receive_disconnect(socket: &UdpSocket) {
-    // Use mqtt_sn_wait_for(socket, MQTT_SN_DISCONNECT);
-    let packet = mqtt_sn_receive_packet(socket);
-    info!("Received DISCONNECT packet: {:?}", packet);
+pub fn mqtt_sn_receive_disconnect(socket: &UdpSocket, settings: &Settings) {
+    mqtt_sn_wait_for(socket, MQTT_SN_DISCONNECT, settings);
 }
 
 pub fn mqtt_sn_send_publish(socket: &UdpSocket, settings: &Settings, message: &str) {
@@ -530,6 +635,44 @@ pub fn mqtt_sn_send_publish(socket: &UdpSocket, settings: &Settings, message: &s
             }
         }
     }
+}
+
+pub fn mqtt_sn_receive_publish(socket: &UdpSocket, settings: &Settings) -> PublishPacket {
+    let packet = mqtt_sn_wait_for(socket, MQTT_SN_PUBLISH, settings);
+    match packet {
+        Some(publish) => {
+            if let Some(publish) = publish.as_publish() {
+                mqtt_sn_print_publish_packet(&publish, settings);
+                publish.clone()
+            } else {
+                panic!("Received packet is not a PUBLISH packet");
+            }
+        }
+        None => panic!("Failed to receive PUBLISH packet"), 
+    }
+}
+
+pub fn mqtt_sn_send_puback(
+    socket: &UdpSocket,
+    packet: &PublishPacket,
+    return_code: u8,
+) {
+    let msg_type = MQTT_SN_PUBACK;
+    let message_id = packet.message_id;
+    let topic_id = packet.topic_id;
+
+    let length = 0x07;
+
+    let packet = PubackPacket {
+        length,
+        msg_type,
+        topic_id,
+        message_id,
+        return_code,
+    };
+
+    info!("Sending PUBACK packet: {:?}", packet);
+    mqtt_sn_send_packet(socket, &packet);
 }
 
 fn mqtt_sn_send_pingreq(socket: &UdpSocket) {
