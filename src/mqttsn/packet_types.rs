@@ -52,6 +52,10 @@ pub trait Packet: Debug {
     fn from_bytes(bytes: &Vec<u8>) -> Self where Self: Sized{
         unimplemented!()
     }
+    fn as_connect(&self) -> Option<&ConnectPacket> { None }
+    fn as_register(&self) -> Option<&RegisterPacket> { None }
+    fn as_publish(&self) -> Option<&PublishPacket> { None }
+    fn as_subscribe(&self) -> Option<&SubscribePacket> { None }
     fn as_regack(&self) -> Option<&RegackPacket> { None }
     fn as_suback(&self) -> Option<&SubackPacket> { None }
     fn as_puback(&self) -> Option<&PubackPacket> { None }
@@ -264,13 +268,14 @@ impl Packet for PublishPacket {
     }
 
     fn from_bytes(bytes: &Vec<u8>) -> Self where Self: Sized {
+        let length = bytes[0] as usize;
         PublishPacket {
             length: bytes[0],
             msg_type: bytes[1],
             flags: bytes[2],
             topic_id: u16::from_be_bytes([bytes[3], bytes[4]]),
             message_id: u16::from_be_bytes([bytes[5], bytes[6]]),
-            data: bytes[7..].to_vec(),
+            data: bytes[7..length].to_vec(),
         }
     }
 
@@ -286,6 +291,10 @@ impl Packet for PublishPacket {
         bytes.push(self.message_id as u8);
         bytes.extend_from_slice(&self.data);
         bytes
+    }
+
+    fn as_publish(&self) -> Option<&PublishPacket> {
+        Some(self)
     }
 }
 
@@ -422,7 +431,7 @@ pub struct SubscribePacket {
 
 impl Packet for SubscribePacket {
     fn length(&self) -> u8 {
-        0x07 + match self.topic {
+        0x05 + match self.topic {
             Topic::TopicId(_) => 2,
             Topic::TopicName(ref name) => name.len() as u8,
         }
@@ -433,17 +442,17 @@ impl Packet for SubscribePacket {
     }
 
     fn from_bytes(bytes: &Vec<u8>) -> Self where Self: Sized {
-        let topic = if bytes[3] == MQTT_SN_TOPIC_TYPE_PREDEFINED {
-            Topic::TopicId(u16::from_be_bytes([bytes[4], bytes[5]]))
+        let topic = if (bytes[2] & MQTT_SN_FLAG_QOS_MASK)  == MQTT_SN_TOPIC_TYPE_PREDEFINED {
+            Topic::TopicId(u16::from_be_bytes([bytes[5], bytes[6]]))
         } else {
-            Topic::TopicName(bytes[4..].to_vec())
+            Topic::TopicName(bytes[5..].to_vec())
         };
 
         SubscribePacket {
             length: bytes[0],
             msg_type: bytes[1],
             flags: bytes[2],
-            message_id: u16::from_be_bytes([bytes[6], bytes[7]]),
+            message_id: u16::from_be_bytes([bytes[5], bytes[6]]),
             topic: topic,
         }
     }
@@ -454,19 +463,17 @@ impl Packet for SubscribePacket {
         bytes.push(self.length);
         bytes.push(self.msg_type);
         bytes.push(self.flags);
+        bytes.push((self.message_id >> 8) as u8);
+        bytes.push(self.message_id as u8);
         match self.topic {
             Topic::TopicId(id) => {
-                bytes.push(MQTT_SN_TOPIC_TYPE_PREDEFINED);
                 bytes.push((id >> 8) as u8);
                 bytes.push(id as u8);
             },
             Topic::TopicName(ref name) => {
-                bytes.push(MQTT_SN_TOPIC_TYPE_NORMAL);
                 bytes.extend_from_slice(name.as_slice());
             },
         }
-        bytes.push((self.message_id >> 8) as u8);
-        bytes.push(self.message_id as u8);
         bytes
     }
 }
@@ -485,7 +492,7 @@ pub struct SubackPacket {
 
 impl Packet for SubackPacket {
     fn length(&self) -> u8 {
-        7
+        8
     }
 
     fn msg_type(&self) -> u8 {
@@ -515,6 +522,10 @@ impl Packet for SubackPacket {
         bytes.push(self.message_id as u8);
         bytes.push(self.return_code);
         bytes
+    }
+
+    fn as_suback(&self) -> Option<&SubackPacket> {
+        Some(self)
     }
 }
 
