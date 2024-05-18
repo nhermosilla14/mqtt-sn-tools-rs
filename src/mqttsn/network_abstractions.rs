@@ -27,6 +27,9 @@ pub fn mqtt_sn_create_connection(settings: &Settings) -> UdpSocket {
     socket.connect(&remote_address)
         .expect("Could not connect to MQTT-SN broker");
 
+    if settings.timeout == 0 {
+        return socket;
+    }
     let timeout = std::time::Duration::from_secs(settings.timeout);
     socket.set_read_timeout(Some(timeout))
         .expect("Could not set read timeout");
