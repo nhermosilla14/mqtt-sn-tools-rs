@@ -6,10 +6,11 @@ use crate::mqttsn::constants::{
     MQTT_SN_DEFAULT_KEEP_ALIVE,
     MQTT_SN_DEFAULT_TIMEOUT,
     MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH,
-    MQTT_SN_MAX_CLIENT_ID_LENGTH
+    MQTT_SN_MAX_CLIENT_ID_LENGTH,
+    MQTT_SN_FLAG_QOS_0,
+    MQTT_SN_FLAG_QOS_1,
+    MQTT_SN_FLAG_QOS_N1,
 };
-
-
 
 // Define a struct to hold the settings
 
@@ -36,7 +37,10 @@ pub struct Settings {
     pub read_stdin: bool,
     pub topic: String,
     pub verbose: bool,
+    pub verbose_time: bool,
     pub topic_map: HashMap<u16, String>,
+    pub topic_list: Vec<String>,
+    pub topic_id_list: Vec<u16>,
     pub loop_frequency: u64,
     pub loop_count: u64,
     pub single_message: bool,
@@ -74,8 +78,11 @@ pub fn default_settings() -> Settings {
         null_message: false,
         read_stdin: false,
         verbose: false,
+        verbose_time: false,
         topic: String::from(""),
         topic_map: HashMap::new(),
+        topic_list: Vec::new(),
+        topic_id_list: Vec::new(),
         loop_frequency: 0,
         loop_count: 0,
         clean_session: true,
@@ -94,6 +101,11 @@ pub fn get_next_message_id() -> u16 {
     let next_id = current_id + 1;
     MESSAGE_ID.with(|cell| cell.set(next_id));
     next_id
+}
+
+pub fn get_last_message_id() -> u16 {
+    let current_id = MESSAGE_ID.with(|cell| cell.get());
+    current_id
 }
 
 pub fn reset_message_id() {
@@ -125,4 +137,15 @@ pub fn set_wireless_node_id(wireless_node_id: Vec<u8>) {
 pub fn get_wireless_node_id() -> Vec<u8> {
     let wireless_node_id = WIRELESS_NODE_ID.with(|cell| cell.get());
     wireless_node_id.to_vec()
+}
+
+
+pub fn get_qos_flag(qos: i8) -> u8 {
+    match qos {
+        0 => MQTT_SN_FLAG_QOS_0,
+        1 => MQTT_SN_FLAG_QOS_1,
+        2 => 0x40,
+        -1 => MQTT_SN_FLAG_QOS_N1,
+        _ => 0,
+    }
 }
