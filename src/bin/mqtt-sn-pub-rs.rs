@@ -274,7 +274,7 @@ fn main(){
         } else if settings.qos >= 0 {
             // Send a REGISTER message
             mqtt_sn_send_register(&socket, &settings);
-            mqtt_sn_receive_regack(&socket);
+            mqtt_sn_receive_regack(&socket, &settings);
             settings.topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
         }
 
@@ -288,7 +288,7 @@ fn main(){
          // Disconnect
          if settings.qos >= 0 {
              mqtt_sn_send_disconnect(&socket, &settings);
-             mqtt_sn_receive_disconnect(&socket);
+             mqtt_sn_receive_disconnect(&socket, &settings);
          }
 
     }
