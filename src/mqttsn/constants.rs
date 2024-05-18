@@ -2,7 +2,7 @@
 
 
 // Defaults
-pub const MQTT_SN_DEFAULT_PORT: u16 = 1883;
+pub const MQTT_SN_DEFAULT_PORT: u16 = 10000;
 pub const MQTT_SN_DEFAULT_TIMEOUT: u64 = 10;
 pub const MQTT_SN_DEFAULT_KEEP_ALIVE: u16 = 10;
 
@@ -53,6 +53,7 @@ pub const MQTT_SN_REJECTED_NOT_SUPPORTED: u8 = 0x03;
 // Flags
 
 pub const MQTT_SN_FLAG_DUP: u8 = 0x80;
+pub const MQTT_SN_FLAG_QOS_MASK: u8 = 0x3 << 5;
 pub const MQTT_SN_FLAG_QOS_0: u8 = 0x00;
 pub const MQTT_SN_FLAG_QOS_1: u8 = 0x20;
 pub const MQTT_SN_FLAG_QOS_2: u8 = 0x40;
