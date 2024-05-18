@@ -1,8 +1,6 @@
 extern crate mqtt_sn_tools_rs;
 
-use std::io::BufReader;
-use std::io::BufRead;
-use std::fs::File;
+use std::str;
 use std::net::UdpSocket;
 use log::{
     warn,
@@ -13,11 +11,11 @@ use log::{
 use env_logger::Builder;
 
 use mqtt_sn_tools_rs::mqttsn::constants::{
-    MQTT_SN_MAX_PAYLOAD_LENGTH, 
-    MQTT_SN_TOPIC_TYPE_NORMAL, 
-    MQTT_SN_TOPIC_TYPE_PREDEFINED, 
-    MQTT_SN_TOPIC_TYPE_SHORT
+    MQTT_SN_FLAG_QOS_MASK,
+    MQTT_SN_FLAG_QOS_1,
+    MQTT_SN_ACCEPTED,
 };
+
 
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
@@ -25,12 +23,14 @@ use mqtt_sn_tools_rs::mqttsn::settings::{
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::{
-    mqtt_sn_send_publish,
     mqtt_sn_send_connect,
-    mqtt_sn_send_register,
+    mqtt_sn_send_subscribe_topic_name,
+    mqtt_sn_send_subscribe_topic_id,
+    mqtt_sn_receive_suback,
+    mqtt_sn_send_puback,
     mqtt_sn_receive_connack,
+    mqtt_sn_receive_publish,
     mqtt_sn_receive_disconnect,
-    mqtt_sn_receive_regack,
     mqtt_sn_send_disconnect,
 };
 
@@ -77,7 +77,7 @@ fn parse_args() -> Settings{
             },
             "-h" => {
                 i += 1;
-                settings.host = args[i].clone();
+                settings.mqtt_sn_host = args[i].clone();
             },
             "-i" => {
                 i += 1;
@@ -93,7 +93,7 @@ fn parse_args() -> Settings{
             },
             "-p" => {
                 i += 1;
-                settings.port = args[i].parse::<u16>().expect("Failed to parse port.");
+                settings.mqtt_sn_port = args[i].parse::<u16>().expect("Failed to parse port.");
             },
             "-q" => {
                 i += 1;
@@ -101,18 +101,18 @@ fn parse_args() -> Settings{
             },
             "-t" => {
                 i += 1;
-                settings.topic = args[i].clone();
+                settings.topic_list.push(args[i].clone());
             },
             "-T" => {
                 i += 1;
-                settings.topic_id = args[i].parse::<u16>().expect("Failed to parse topic ID.");
+                settings.topic_id_list.push(args[i].parse::<u16>().expect("Failed to parse topic ID."));
             },
             "--fe" => {
                 settings.forwarder_encapsulation = true;
             },
             "--wlnid" => {
                 i += 1;
-                settings.wireless_node_id = args[i].clone();
+                settings.wireless_node_id = args[i].parse().unwrap();
             },
             "--cport" => {
                 i += 1;
@@ -133,14 +133,7 @@ fn parse_args() -> Settings{
     }
 
     // Check for missing arguments
-    // The required arguments are topic_name or topic_id, and message or
-    // file.
-    if (settings.topic == "" && settings.topic_id == 0) || ((settings.message == "" && !settings.null_message) && settings.file == "") {
-        error!("Missing required arguments.");
-        usage();
-    }
-
-    // Check for invalid arguments
+    
     // The QoS value must be 0, 1 or -1
     if settings.qos != 0 && settings.qos != 1 && settings.qos != -1 {
         error!("Invalid QoS value: {}", settings.qos);
@@ -153,12 +146,6 @@ fn parse_args() -> Settings{
         usage();
     }
 
-    // Only a message or a file can be provided
-    if settings.message != "" && settings.file != "" {
-        error!("Both message and file provided. Only one is allowed.");
-        usage();
-    }
-
     // Topic must be valid for QoS -1
     // That means either a short topic name or a pre-defined topic ID
     if (settings.qos == -1) && (settings.topic_id == 0) && (settings.topic.len() != 2) {
@@ -167,55 +154,6 @@ fn parse_args() -> Settings{
     }
 
     settings
-}
-
-
-// Placeholder for publish_file
-fn publish_file(socket: &UdpSocket, settings: &Settings) {
-    let mut message: String;
-    // Open the file
-    // If it is -, read from STDIN
-    // Otherwise, read from the file
-    let mut file: Box<dyn BufRead> = match settings.file.as_str() {
-        "-" => Box::new(BufReader::new(std::io::stdin())),
-        _ => Box::new(BufReader::new(File::open(settings.file.as_str()).expect("Failed to open file.")))
-    };
-    // Check if you are supposed to read one message per line
-    // If so, do it
-    // Otherwise, read the whole file
-    if settings.one_message_per_line {
-        for line in file.lines() {
-            let line = line.unwrap();
-            // Check if the line is empty
-            // If so, skip it
-            if line == "" {
-                continue;
-            }
-            // Check if the line is too long
-            // If so, truncate it
-            if line.len() > MQTT_SN_MAX_PAYLOAD_LENGTH {
-                warn!("Line too long. Truncating to {} bytes.", MQTT_SN_MAX_PAYLOAD_LENGTH);
-                message  = line[..MQTT_SN_MAX_PAYLOAD_LENGTH].to_string();
-            } else {
-                message = line;
-            }
-            // Publish
-            mqtt_sn_send_publish(socket, &settings, &message);
-        }
-    } else {
-        // Read the file up to MQTT_SN_MAX_PAYLOAD_LENGTH
-        let mut buffer = vec![0; MQTT_SN_MAX_PAYLOAD_LENGTH];
-        let bytes_read = file.read(&mut buffer).expect("Failed to read file.");
-
-        // Strip the buffer of any null bytes
-        if bytes_read < MQTT_SN_MAX_PAYLOAD_LENGTH {
-            buffer.truncate(bytes_read);
-        }
-        // Publish
-        let message = String::from_utf8(buffer).expect("Failed to convert buffer to string.");
-        // Publish
-        mqtt_sn_send_publish(socket, &settings, message.as_str());
-    }
 }
 
 fn main(){
@@ -244,39 +182,62 @@ fn main(){
     // First open a UDP socket
     let socket: UdpSocket = mqtt_sn_create_connection(&settings);
 
-    if settings.qos >= 0 {
-        // Send a CONNECT message
-        mqtt_sn_send_connect(&socket, &settings, true);
-        mqtt_sn_receive_connack(&socket);
+    settings.timeout = settings.keep_alive as u64 / 2;
+
+    // Send a CONNECT message
+    debug!("Sending CONNECT message");
+    mqtt_sn_send_connect(&socket, &settings, true);
+    mqtt_sn_receive_connack(&socket, &settings);
+
+    // Subscribe to the topics by topic name
+    for topic in settings.topic_list.iter() {
+        debug!("Subscribing to topic: {}", topic);
+        mqtt_sn_send_subscribe_topic_name(&socket, &settings, topic);
+        let topic_id = mqtt_sn_receive_suback(&socket, &settings);
+
+        if topic_id != 0  && topic.len() > 2 {
+            settings.topic_map.insert(topic_id, topic.clone());
+        }
+    }
+
+    // Subscribe to the topics by topic ID
+    for topic_id in settings.topic_id_list.iter() {
+        debug!("Subscribing to topic ID: {}", topic_id);
+        mqtt_sn_send_subscribe_topic_id(&socket, &settings, *topic_id);
+        mqtt_sn_receive_suback(&socket, &settings);
+    }
+
+    loop {
+        // Receive messages
+        debug!("Waiting for a message");
+        let packet = mqtt_sn_receive_publish(&socket, &settings);
+
+        if packet.data.len() == 0 {
+            warn!("Received an empty packet. Ignoring.");
+            continue;    
+        }
         
-        // Then check if the topic is a pre-defined topic ID
-        if settings.topic_id != 0 {
-            // Use a pre-defined topic ID
-            settings.topic_id_type = MQTT_SN_TOPIC_TYPE_PREDEFINED;
-        } else if settings.topic.len() == 2 {
-            // Use a short topic name
-            settings.topic_id_type = MQTT_SN_TOPIC_TYPE_SHORT;
-            // Convert the 2 character topic name into a 2 byte topic ID
-            settings.topic_id = ((settings.topic.as_bytes()[0] as u16) << 8) | (settings.topic.as_bytes()[1] as u16);
-        } else if settings.qos >= 0 {
-            // Send a REGISTER message
-            mqtt_sn_send_register(&socket, &settings);
-            mqtt_sn_receive_regack(&socket);
-            settings.topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
+        let message = str::from_utf8(&packet.data).unwrap();
+        let msg_qos = packet.flags & MQTT_SN_FLAG_QOS_MASK;
+        if msg_qos == MQTT_SN_FLAG_QOS_1 {
+            // Send a PUBACK
+            mqtt_sn_send_puback(&socket, &packet, MQTT_SN_ACCEPTED);
+        //} else if msg_qos == MQTT_SN_FLAG_QOS_2 {
+        //    // Send a PUBREC
+        //    mqtt_sn_send_pubrec(&socket, &settings, &packet);
+        }
+        // Print the message
+        println!("{}", message);
+
+        if settings.single_message {
+            break;
         }
 
-       // Publish the message to the topic
-         if settings.file != "" {
-              publish_file(&socket, &settings);
-         } else {
-              mqtt_sn_send_publish(&socket, &settings, ""); 
-         }
-
-         // Disconnect
-         if settings.qos >= 0 {
-             mqtt_sn_send_disconnect(&socket, &settings);
-             mqtt_sn_receive_disconnect(&socket);
-         }
-
     }
+
+    // Send a DISCONNECT message
+    mqtt_sn_send_disconnect(&socket, &settings);
+    debug!("Sending DISCONNECT message");
+    mqtt_sn_receive_disconnect(&socket, &settings);
+    
 }
