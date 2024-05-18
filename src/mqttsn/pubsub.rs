@@ -123,15 +123,15 @@ pub fn mqtt_sn_validate_packet(buffer: &[u8], settings: &Settings) -> Option<Box
         }
     }
     // Return the packet
-    Some(mqtt_sn_rebuild_packet(&buffer.to_vec()))
+    mqtt_sn_rebuild_packet(&buffer.to_vec())
 }
 
-pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Box<dyn Packet> {
+pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Option<Box<dyn Packet>> {
     // Read the message type
     let msg_type = buffer[1];
 
     // Create a packet based on the message type
-    match msg_type {
+    let packet: Box<dyn Packet> = match msg_type {
         // All supported message types in order
         //MQTT_SN_ADVERTISE => Box::new(AdvertisePacket::from_bytes(buffer)),
         //MQTT_SN_SEARCHGW => Box::new(SearchgwPacket::from_bytes(buffer)),
@@ -161,8 +161,10 @@ pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Box<dyn Packet> {
         //MQTT_SN_WILLMSGUPD => Box::new(WillmsgupdPacket::from_bytes(buffer)),
         //MQTT_SN_WILLMSGRESP => Box::new(WillmsgrespPacket::from_bytes(buffer)),
         //MQTT_SN_FRWDENCAP => Box::new(FrwdencapPacket::from_bytes(buffer)),
-        _ => panic!("Unknown message type: {}", msg_type),
-    }
+        _ => return None,
+    };
+
+    Some(packet)
 }
 
 pub fn mqtt_sn_wait_for(
@@ -187,63 +189,29 @@ pub fn mqtt_sn_wait_for(
         // Receive a packet
         let packet = mqtt_sn_receive_packet(socket);
 
-        // Check the received packet type
-        match packet.msg_type() {
-            // Publish
-            MQTT_SN_PUBLISH => {
-                info!("Received PUBLISH packet.");
+        let safe_packet: Box<dyn Packet> = match packet {
+            Some(packet) => packet,
+            None => {
+                warn!("Network timeout reached while waiting for packet");
+                warn!("Retrying...");
+                continue;
             }
-            // Puback
-            MQTT_SN_PUBACK => {
-                info!("Received PUBACK packet.");
-            }
-            // Disconnect
-            MQTT_SN_DISCONNECT => {
-                if packet_type != MQTT_SN_DISCONNECT {
-                    let disconnect = packet.as_disconnect().unwrap();
-                    error!("Received DISCONNECT packet from gateway: {:?}", disconnect);
-                    // Exit and return -1
-                    std::process::exit(-1);
-                }
-            }
-            // Register
-            MQTT_SN_REGISTER => {
-                //let register = packet.as_register().unwrap();
-                info!("Received REGISTER packet.");
-            }
-            // Pingresp
-            MQTT_SN_PINGRESP => {
-                //let pingresp = packet.as_pingresp().unwrap();
-                info!("Received PINGRESP packet.");
-            }
-            // Connack
-            MQTT_SN_CONNACK => {
-                //let connack = packet.as_connack().unwrap();
-                info!("Received CONNACK packet.");
-            }
-            // Regack
-            MQTT_SN_REGACK => {
-                //let regack = packet.as_regack().unwrap();
-                info!("Received REGACK packet.");
-            }
-            // Suback
-            MQTT_SN_SUBACK => {
-                //let suback = packet.as_suback().unwrap();
-                info!("Received SUBACK packet.");
-            }
-            _ => {
-                warn!(
-                    "Was expecting {} packet but received {}",
-                    mqtt_sn_packet_type_to_str(packet_type),
-                    mqtt_sn_packet_type_to_str(packet.msg_type())
-                );
-            }
-        }
+        };
 
-        // Check if the packet is the expected type
-        if packet.msg_type() == packet_type {
-            debug!("Received expected packet: {:?}", packet);
-            return Some(packet);
+        if safe_packet.msg_type() == packet_type {
+            debug!("Received expected packet: {:?}", safe_packet);
+            return Some(safe_packet);
+        } else if safe_packet.msg_type() == MQTT_SN_DISCONNECT {
+            let disconnect = safe_packet.as_disconnect().unwrap();
+            error!("Received DISCONNECT packet from gateway: {:?}", disconnect);
+            // Exit and return -1
+            std::process::exit(-1);
+        } else {
+            warn!(
+                "Was expecting {} packet but received {}",
+                mqtt_sn_packet_type_to_str(packet_type),
+                mqtt_sn_packet_type_to_str(safe_packet.msg_type())
+            );
         }
 
         // Check if the timeout has been reached
@@ -255,7 +223,7 @@ pub fn mqtt_sn_wait_for(
     None
 }
 
-pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) -> Box<dyn Packet> {
+pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the data, with a maximun size given by:
     // MQTT_SN_MAX_PACKET_LENGTH
     // MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH
@@ -302,7 +270,8 @@ pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) ->
     // Validate the packet
     let generic_packet = mqtt_sn_validate_packet(&buffer, settings);
     if generic_packet.is_none() {
-        panic!("Failed to validate packet");
+        error!("Failed to validate packet");
+        return None;
     } else {
         debug!("Packet validated");
     }
@@ -326,23 +295,30 @@ pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) ->
     }
 }
 
-pub fn mqtt_sn_receive_packet(socket: &UdpSocket) -> Box<dyn Packet> {
+pub fn mqtt_sn_receive_packet(socket: &UdpSocket) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the packet data
     let mut buffer: [u8; MQTT_SN_MAX_PACKET_LENGTH] = [0; MQTT_SN_MAX_PACKET_LENGTH];
     info!("Waiting to receive packet...");
 
-    // Read the packet into the buffer
-    let (bytes_read, _src) = socket
-        .recv_from(&mut buffer)
-        .expect("Failed to read from socket");
+    // Read the packet into the buffer safely
+    let read_result = socket.recv(&mut buffer);
+
+    if read_result.is_err() {
+        error!("Failed to read from socket");
+        return None;
+    }
+    // Get the number of bytes read
+    let bytes_read = read_result.unwrap();
+
     debug!("Received {} bytes", bytes_read);
 
     if bytes_read == 0 {
-        panic!("Failed to read from socket");
+        error!("Failed to read from socket");
+        return None;
     }
 
     // Rebuild the packet
-    let packet: Box<dyn Packet> = mqtt_sn_rebuild_packet(&buffer.to_vec());
+    let packet = mqtt_sn_rebuild_packet(&buffer.to_vec());
     // Return the packet
     packet
 }
