@@ -27,20 +27,20 @@ Since this aims for feature parity with the original tools, the currently suppor
 - [X] Clean / unclean sessions
 - [X] Manual and automatic client ID generation
 - [X] Pre-defined topic IDs and short topic names
-- [X] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
+- [?] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
 
 ## Subscriber (mqtt-sn-sub-rs)
 
-- [ ] QoS 0, 1 and -1
-- [ ] Keep alive pings
-- [ ] Publishing retained messages
-- [ ] Publishing empty messages
-- [ ] Subscribing to named topic
-- [ ] Clean / unclean sessions
-- [ ] Manual and automatic client ID generation
-- [ ] Displaying topic name with wildcard subscriptions
-- [ ] Pre-defined topic IDs and short topic names
-- [ ] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
+- [X] QoS 0, 1 and -1
+- [X] Keep alive pings
+- [X] Publishing retained messages
+- [X] Publishing empty messages
+- [X] Subscribing to named topic
+- [X] Clean / unclean sessions
+- [X] Manual and automatic client ID generation
+- [X] Displaying topic name with wildcard subscriptions
+- [X] Pre-defined topic IDs and short topic names
+- [?] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
 
 ## Serial port bridge (mqtt-sn-serial-bridge-rs)
 
@@ -69,9 +69,12 @@ Since this aims for feature parity with the original tools, the currently suppor
 - [ ] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
 
 
+
 Now, given I was already writting a whole new set of tools, I though I might also support some additional stuff. This extended feature set (most of which is only planned so far, not implemented) goes like this:
 
-- [ ] Network agnostic publication. Something like the SensorNetwork abstraction in the PAHO MQTT-SN Gateway. That way you could, theoretically, send and receive messages using any underlying protocol, even a custom one (I'm already working on a serial implementation, starting from the code for the bridge).
+- [X] Loop publishing. This allows to publish a message in a loop, with a given delay between each message. This is useful for testing purposes, and it's quite easy to implement.
+
+- [X] Agnostic network layer. The original tools are quite tied to the UDP protocol, which is fine for most cases. But I wanted to make it possible to use other network protocols, such as TCP or even serial connections. This is done by defining a trait for the network layer, which is implemented by the UDP network layer(and there's also a WIP serial implementation). This is already implemented, and it's quite easy to implement new network layers.
 
 - [ ] Serial publisher and subscriber. The original set of tools provides a bridge, which is quite useful to connect a device sendind and receiving data over a serial port with a gateway listening over UDP. This additional tool will help debug connections and provide a way to send a raw stream of data over a serial connection (to emulate a SN device, and other possible use cases).
 
@@ -128,10 +131,29 @@ cargo build
       --wlnid        If Forwarder Encapsulation is enabled, wireless node ID for this client. Defaults to process id.
       --cport <port> Source port for outgoing packets. Uses port in ephemeral range if not specified or set to 0.
 
+    Some extended options:
+      --loop-freq    Frequency in Hz to send messages. Defaults to 0 (disabled).
+      --count        Number of messages to send in loop. Defaults to 0 (loops forever).
+
 
 ## Subscribing
 
-This is still a WIP
+      -1             exit after receiving a single message.
+      -c             disable 'clean session' (store subscription and pending messages when client disconnects).
+      -d             Increase debug level by one. -d can occur multiple times.
+      -h <host>      MQTT-SN host to connect to. Defaults to '127.0.0.1'.
+      -i <clientid>  ID to use for this client. Defaults to 'mqtt-sn-tools-' with process id.
+      -k <keepalive> keep alive in seconds for this client. Defaults to 3.
+      -e <sleep>     sleep duration in seconds when disconnecting. Defaults to 0.
+      -p <port>      Network port to connect to. Defaults to '10000'.
+      -q <qos>       QoS level to subscribe with (0 or 1). Defaults to 0.
+      -t <topic>     MQTT-SN topic name to subscribe to. It may repeat multiple times.
+      -T <topicid>   Pre-defined MQTT-SN topic ID to subscribe to. It may repeat multiple times.
+      --fe           Enables Forwarder Encapsulation. Mqtt-sn packets are encapsulated according to MQTT-SN Protocol Specification v1.2, chapter 5.5 Forwarder Encapsulation.
+      --wlnid        If Forwarder Encapsulation is enabled, wireless node ID for this client. Defaults to process id (truncating if necessary).
+      --cport <port> Source port for outgoing packets. Uses port in ephemeral range if not specified or set to 0.
+      -v             Print messages verbosely, showing the topic name. 
+      -V             Print messages verbosely, showing current time and the topic name. Currently, only id.
 
 ## UDP Dumping
 

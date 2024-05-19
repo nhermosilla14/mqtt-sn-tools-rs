@@ -23,15 +23,7 @@ use mqtt_sn_tools_rs::mqttsn::settings::{
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::{
-    mqtt_sn_send_connect,
-    mqtt_sn_send_subscribe_topic_name,
-    mqtt_sn_send_subscribe_topic_id,
-    mqtt_sn_receive_suback,
-    mqtt_sn_send_puback,
-    mqtt_sn_receive_connack,
-    mqtt_sn_receive_publish,
-    mqtt_sn_receive_disconnect,
-    mqtt_sn_send_disconnect,
+    mqtt_sn_connect, mqtt_sn_receive_disconnect, mqtt_sn_receive_publish, mqtt_sn_receive_suback, mqtt_sn_send_disconnect, mqtt_sn_send_puback, mqtt_sn_send_subscribe_topic_id, mqtt_sn_send_subscribe_topic_name
 };
 
 use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
@@ -180,26 +172,26 @@ fn main(){
     };
     builder.filter(None, log_level);
     builder.init();
+    
+    settings.timeout = settings.keep_alive as u64 / 2;
 
     // Print the settings
     debug!("{:?}", settings);
-
     // First open a connection
     let mut boxed_sensor_network: Box<dyn SensorNetwork> = create_sensor_network(SensorNetworkType::UDP, SensorNetworkInitArgs::UDP {
         source_address: format!("0.0.0.0:{}", settings.source_port),
         destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
-        timeout: settings.keep_alive as u64,
+        timeout: settings.timeout as u64,
     });
 
     let sensor_net = &mut *boxed_sensor_network;
     sensor_net.initialize();
 
-    settings.timeout = settings.keep_alive as u64 / 2;
+    
 
     // Send a CONNECT message
     debug!("Sending CONNECT message");
-    mqtt_sn_send_connect(sensor_net, &settings, true);
-    mqtt_sn_receive_connack(sensor_net, &settings);
+    mqtt_sn_connect(sensor_net, &settings); 
 
     // Subscribe to the topics by topic name
     for topic in settings.topic_list.iter() {

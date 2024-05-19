@@ -3,7 +3,7 @@
 
 // Defaults
 pub const MQTT_SN_DEFAULT_PORT: u16 = 10000;
-pub const MQTT_SN_DEFAULT_TIMEOUT: u64 = 0;
+pub const MQTT_SN_DEFAULT_TIMEOUT: u64 = 10;
 pub const MQTT_SN_DEFAULT_KEEP_ALIVE: u16 = 3;
 
 // Limits

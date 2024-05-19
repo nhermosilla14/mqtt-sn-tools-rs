@@ -7,6 +7,7 @@
 
 
 use std::{net::UdpSocket, time::Duration};
+use log::{info, error};
 // SerialPort
 use serialport::{SerialPort, DataBits, FlowControl, Parity};
 use std::io::prelude::*;
@@ -16,7 +17,7 @@ pub trait SensorNetwork {
     fn initialize(&self);
     fn get_description(&self) -> String;
     fn receive(&mut self) -> Result<Vec<u8>, std::io::Error>;
-    fn send(&mut self, data: &[u8]) -> bool;
+    fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error>;
     fn get_timeout(&self) -> u64;
     fn close(&self);
 }
@@ -118,10 +119,17 @@ impl SensorNetwork for UDPSensorNetwork {
         format!("UDP Sensor Network: Source: {}, Destination: {}", self.source_address, self.destination_address)
     }
 
-   fn send(&mut self, data: &[u8]) -> bool {
-        self.socket.send(data)
-            .expect("Could not send data");
-        true
+   fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
+        match self.socket.send(data) {
+            Ok(size) => {
+                info!("Sent {} bytes", size);
+                Ok(size)
+            }
+            Err(e) => {
+                error!("Error sending data: {}", e);
+                Err(e)
+            }
+        }
     }
 
     fn receive(&mut self) -> Result<Vec<u8>, std::io::Error> {
@@ -195,10 +203,17 @@ impl SensorNetwork for SerialPortSensorNetwork {
         format!("Serial Port Sensor Network:\nPort: {}\nBaud Rate: {}\nParity: {:?}\nData Bits: {:?}\nFlow Control: {:?}\nTimeout: {}",
         self.port_name, self.baud_rate, self.parity, self.data_bits, self.flow_control, self.timeout)
     }
-    fn send(&mut self, data: &[u8]) -> bool {
-        self.port.write_all(data)
-            .expect("Could not write data to serial port");
-        true    
+    fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
+        match self.port.write_all(data) {
+            Ok(()) => {
+                info!("Sent {} bytes", data.len());
+                Ok(data.len() as usize)
+            }
+            Err(e) => {
+                error!("Error sending data: {}", e);
+                Err(e)
+            }
+        } 
     }
 
     fn receive(&mut self) -> Result<Vec<u8>, std::io::Error>{

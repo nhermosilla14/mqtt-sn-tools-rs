@@ -1,0 +1,18 @@
+- Desacoplar settings:
+    - Common settings
+    - Subscriber settings
+    - Publisher settings
+
+- Capa de comunicación separada
+
+- Máquina de estados para el manejo de la comunicación
+
+- Manejo de errores
+
+- Manejo de timeouts
+
+- Manejo de reintentos
+
+- Manejo de reconexión
+
+- Manejo de desconexión
