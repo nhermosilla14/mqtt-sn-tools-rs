@@ -1,7 +1,6 @@
 // This module defines the logic for sending and receiving MQTT-SN packets.
 
 use log::{debug, error, info, warn, LevelFilter};
-use std::net::UdpSocket;
 
 use crate::mqttsn::constants::{
     //Message types
@@ -57,9 +56,11 @@ use crate::mqttsn::settings::{
     set_topic_id, set_wireless_node_id, Settings,
 };
 
+use crate::mqttsn::network_abstractions::SensorNetwork;
+
 // Generic send and receive functions
 
-pub fn mqtt_sn_send_packet(socket: &UdpSocket, packet: &dyn Packet) {
+pub fn mqtt_sn_send_packet(sensor_net: &mut dyn SensorNetwork, packet: &dyn Packet) {
     // Use the length to get the bytes
     let packet_bytes = packet.as_bytes();
     let packet_length = packet_bytes[0];
@@ -73,7 +74,7 @@ pub fn mqtt_sn_send_packet(socket: &UdpSocket, packet: &dyn Packet) {
     hex_buffer.pop();
     debug!("Sending packet: {:?}", hex_buffer);
 
-    socket.send(safe_buffer).expect("Failed to send packet");
+    sensor_net.send(safe_buffer);
 }
 
 pub fn mqtt_sn_print_publish_packet(packet: &PublishPacket, settings: &Settings) {
@@ -168,7 +169,7 @@ pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Option<Box<dyn Packet>> {
 }
 
 pub fn mqtt_sn_wait_for(
-    socket: &UdpSocket,
+    sensor_net: &mut dyn SensorNetwork,
     packet_type: u8,
     settings: &Settings,
 ) -> Option<Box<dyn Packet>> {
@@ -183,11 +184,11 @@ pub fn mqtt_sn_wait_for(
         {
             // Send a PINGREQ packet
             debug!("Sending PINGREQ packet");
-            mqtt_sn_send_pingreq(socket);
+            mqtt_sn_send_pingreq(sensor_net);
             last_transmission = std::time::Instant::now();
         }
         // Receive a packet
-        let packet = mqtt_sn_receive_packet(socket);
+        let packet = mqtt_sn_receive_packet(sensor_net);
 
         let safe_packet: Box<dyn Packet> = match packet {
             Some(packet) => packet,
@@ -217,30 +218,48 @@ pub fn mqtt_sn_wait_for(
         // Check if the timeout has been reached
         if settings.timeout > 0 && start.elapsed().as_secs() >= settings.timeout {
             println!("Timeout reached while waiting for packet");
+            println!("Timeout: {}", settings.timeout);
             break;
         }
     }
     None
 }
 
-pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) -> Option<Box<dyn Packet>> {
+pub fn mqtt_receive_frwdencap_packet(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the data, with a maximun size given by:
     // MQTT_SN_MAX_PACKET_LENGTH
     // MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH
     // + 4 (for the protocol overhead)
     const MAX_SIZE: usize = MQTT_SN_MAX_PACKET_LENGTH + MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH + 4;
-    let mut buffer: [u8; MAX_SIZE] = [0; MAX_SIZE];
+    let mut buffer: Vec<u8>;
 
     debug!("Waiting to receive packet...");
 
-    // Read the packet into the buffer
-    let (bytes_read, src_address) = socket
-        .recv_from(&mut buffer)
-        .expect("Failed to read from socket");
+    // Read the packet into the buffer safely
+    let read_result = sensor_net.receive();
+    match read_result {
+        Ok(data) => {
+            buffer = data;
+        }
+        Err(e) => {
+            error!("Failed to read from sensor_net: {:?}", e);
+            return None;
+        }
+    } 
+
+    let mut bytes_read = buffer[0] as usize;
+
+    if bytes_read > MAX_SIZE as usize {
+        error!("Received packet is too long: {}", bytes_read);
+        warn!("Truncating packet to {} bytes", MAX_SIZE);
+        bytes_read = MAX_SIZE as usize;
+        buffer.resize(bytes_read, 0);
+    }
+
     debug!("Received {} bytes", bytes_read);
 
     if bytes_read == 0 {
-        panic!("Failed to read from socket");
+        panic!("Failed to read from sensor_net");
     }
 
     let log_level = log::max_level();
@@ -248,21 +267,16 @@ pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) ->
         // Check if the packet is a forwarder encapsulation packet
         if buffer[1] == MQTT_SN_FRWDENCAP {
             debug!(
-                "Received {} bytes from {}:{}. Type={} with {} inside on socket: {}",
+                "Received {} bytes from sensor_net. Packet type {} -> {}",
                 bytes_read,
-                src_address.ip(),
-                src_address.port(),
                 mqtt_sn_packet_type_to_str(buffer[2]),
                 mqtt_sn_packet_type_to_str(buffer[3]),
-                socket.local_addr().unwrap().port()
             );
         } else {
             debug!(
-                "Received {} bytes from {}:{} on socket {}",
+                "Received {} bytes from sensor_net. Packet type {}",
                 bytes_read,
-                src_address.ip(),
-                src_address.port(),
-                socket.local_addr().unwrap().port()
+                mqtt_sn_packet_type_to_str(buffer[1]),
             );
         }
     }
@@ -295,25 +309,38 @@ pub fn mqtt_receive_frwdencap_packet(socket: &UdpSocket, settings: &Settings) ->
     }
 }
 
-pub fn mqtt_sn_receive_packet(socket: &UdpSocket) -> Option<Box<dyn Packet>> {
+pub fn mqtt_sn_receive_packet(sensor_net: &mut dyn SensorNetwork) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the packet data
-    let mut buffer: [u8; MQTT_SN_MAX_PACKET_LENGTH] = [0; MQTT_SN_MAX_PACKET_LENGTH];
+    let mut buffer: Vec<u8>;
     info!("Waiting to receive packet...");
 
     // Read the packet into the buffer safely
-    let read_result = socket.recv(&mut buffer);
+    let read_result = sensor_net.receive();
 
-    if read_result.is_err() {
-        error!("Failed to read from socket");
-        return None;
+    match read_result {
+        Ok(data) => {
+            buffer = data;
+        }
+        Err(e) => {
+            error!("Failed to read from sensor_net: {:?}", e);
+            return None;
+        }
+    }    
+
+    // Check the number of bytes read
+    let mut bytes_read = buffer[0] as usize;
+
+    if bytes_read > MQTT_SN_MAX_PACKET_LENGTH as usize {
+        error!("Received packet is too long: {}", bytes_read);
+        warn!("Truncating packet to {} bytes", MQTT_SN_MAX_PACKET_LENGTH);
+        bytes_read = MQTT_SN_MAX_PACKET_LENGTH as usize;
+        buffer.resize(bytes_read, 0);
     }
-    // Get the number of bytes read
-    let bytes_read = read_result.unwrap();
 
     debug!("Received {} bytes", bytes_read);
 
     if bytes_read == 0 {
-        error!("Failed to read from socket");
+        error!("Failed to read from sensor_net");
         return None;
     }
 
@@ -325,7 +352,7 @@ pub fn mqtt_sn_receive_packet(socket: &UdpSocket) -> Option<Box<dyn Packet>> {
 
 // Specific send and receive functions
 
-pub fn mqtt_sn_send_connect(socket: &UdpSocket, settings: &Settings, clean_session: bool) {
+pub fn mqtt_sn_send_connect(sensor_net: &mut dyn SensorNetwork, settings: &Settings, clean_session: bool) {
     // Check client id length
     if settings.client_id.len() > MQTT_SN_MAX_CLIENT_ID_LENGTH {
         panic!(
@@ -356,14 +383,14 @@ pub fn mqtt_sn_send_connect(socket: &UdpSocket, settings: &Settings, clean_sessi
     };
 
     info!("Sending CONNECT {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_receive_connack(socket: &UdpSocket, settings: &Settings) {
-    mqtt_sn_wait_for(socket, MQTT_SN_CONNACK, settings);
+pub fn mqtt_sn_receive_connack(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+    mqtt_sn_wait_for(sensor_net, MQTT_SN_CONNACK, settings);
 }
 
-pub fn mqtt_sn_send_register(socket: &UdpSocket, settings: &Settings) {
+pub fn mqtt_sn_send_register(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
     // Check topic name length
     if settings.topic.len() > MQTT_SN_MAX_TOPIC_LENGTH {
         panic!(
@@ -392,11 +419,11 @@ pub fn mqtt_sn_send_register(socket: &UdpSocket, settings: &Settings) {
     };
 
     info!("Sending REGISTER packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_receive_regack(socket: &UdpSocket, settings: &Settings) -> RegackPacket {
-    let packet = mqtt_sn_wait_for(socket, MQTT_SN_REGACK, settings);
+pub fn mqtt_sn_receive_regack(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> RegackPacket {
+    let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_REGACK, settings);
 
     if let Some(regack) = packet.unwrap().as_regack() {
         debug!("Updated topic ID: {}", regack.topic_id);
@@ -408,7 +435,7 @@ pub fn mqtt_sn_receive_regack(socket: &UdpSocket, settings: &Settings) -> Regack
     }
 }
 
-pub fn mqtt_sn_send_subscribe_topic_name(socket: &UdpSocket, settings: &Settings, topic: &str) {
+pub fn mqtt_sn_send_subscribe_topic_name(sensor_net: &mut dyn SensorNetwork, settings: &Settings, topic: &str) {
     // Check topic name length
     if topic.len() > MQTT_SN_MAX_TOPIC_LENGTH {
         panic!(
@@ -445,10 +472,10 @@ pub fn mqtt_sn_send_subscribe_topic_name(socket: &UdpSocket, settings: &Settings
     };
 
     info!("Sending SUBSCRIBE packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_send_subscribe_topic_id(socket: &UdpSocket, settings: &Settings, topic_id: u16) {
+pub fn mqtt_sn_send_subscribe_topic_id(sensor_net: &mut dyn SensorNetwork, settings: &Settings, topic_id: u16) {
     let msg_type = MQTT_SN_SUBSCRIBE;
     let message_id = get_next_message_id();
     let mut flags = 0;
@@ -471,11 +498,11 @@ pub fn mqtt_sn_send_subscribe_topic_id(socket: &UdpSocket, settings: &Settings, 
     };
 
     info!("Sending SUBSCRIBE packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_receive_suback(socket: &UdpSocket, settings: &Settings) -> u16 {
-    let packet = mqtt_sn_wait_for(socket, MQTT_SN_SUBACK, settings);
+pub fn mqtt_sn_receive_suback(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> u16 {
+    let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_SUBACK, settings);
 
     if let Some(suback) = packet.unwrap().as_suback() {
         debug!("Received SUBACK packet: {:?}", suback);
@@ -502,7 +529,7 @@ pub fn mqtt_sn_receive_suback(socket: &UdpSocket, settings: &Settings) -> u16 {
     }
 }
 
-pub fn mqtt_sn_send_disconnect(socket: &UdpSocket, settings: &Settings) {
+pub fn mqtt_sn_send_disconnect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
     let msg_type = MQTT_SN_DISCONNECT;
     if settings.sleep_duration == 0 {
         let length = 0x02;
@@ -512,7 +539,7 @@ pub fn mqtt_sn_send_disconnect(socket: &UdpSocket, settings: &Settings) {
             duration: 0,
         };
         info!("Sending DISCONNECT packet: {:?}", packet);
-        mqtt_sn_send_packet(socket, &packet);
+        mqtt_sn_send_packet(sensor_net, &packet);
     } else {
         let length: u8 = 0x04;
         let duration: u16 = settings.sleep_duration as u16;
@@ -522,15 +549,15 @@ pub fn mqtt_sn_send_disconnect(socket: &UdpSocket, settings: &Settings) {
             duration,
         };
         info!("Sending DISCONNECT packet: {:?}", packet);
-        mqtt_sn_send_packet(socket, &packet);
+        mqtt_sn_send_packet(sensor_net, &packet);
     }
 }
 
-pub fn mqtt_sn_receive_disconnect(socket: &UdpSocket, settings: &Settings) {
-    mqtt_sn_wait_for(socket, MQTT_SN_DISCONNECT, settings);
+pub fn mqtt_sn_receive_disconnect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+    mqtt_sn_wait_for(sensor_net, MQTT_SN_DISCONNECT, settings);
 }
 
-pub fn mqtt_sn_send_publish(socket: &UdpSocket, settings: &Settings, message: &str) {
+pub fn mqtt_sn_send_publish(sensor_net: &mut dyn SensorNetwork, settings: &Settings, message: &str) {
     // Check message length
     const MAX_MESSAGE_LENGTH: usize = MQTT_SN_MAX_PACKET_LENGTH - 7;
     if message.len() > MAX_MESSAGE_LENGTH {
@@ -594,11 +621,11 @@ pub fn mqtt_sn_send_publish(socket: &UdpSocket, settings: &Settings, message: &s
     };
 
     info!("Sending PUBLISH packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 
     if settings.qos == 1 {
         // Wait for PUBACK
-        let packet = mqtt_sn_wait_for(socket, MQTT_SN_PUBACK, settings);
+        let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_PUBACK, settings);
         match packet {
             Some(real_packet) => {
                 if real_packet.msg_type() == MQTT_SN_PUBACK {
@@ -613,23 +640,27 @@ pub fn mqtt_sn_send_publish(socket: &UdpSocket, settings: &Settings, message: &s
     }
 }
 
-pub fn mqtt_sn_receive_publish(socket: &UdpSocket, settings: &Settings) -> PublishPacket {
-    let packet = mqtt_sn_wait_for(socket, MQTT_SN_PUBLISH, settings);
+pub fn mqtt_sn_receive_publish(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> Option<PublishPacket> {
+    let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_PUBLISH, settings);
     match packet {
         Some(publish) => {
             if let Some(publish) = publish.as_publish() {
                 mqtt_sn_print_publish_packet(&publish, settings);
-                publish.clone()
+                Some(publish.clone())
             } else {
-                panic!("Received packet is not a PUBLISH packet");
+                warn!("Received packet is not a PUBLISH packet");
+                None
             }
         }
-        None => panic!("Failed to receive PUBLISH packet"), 
+        None => {
+            warn!("Timeout reached. Retrying...");
+            None
+        }
     }
 }
 
 pub fn mqtt_sn_send_puback(
-    socket: &UdpSocket,
+    sensor_net: &mut dyn SensorNetwork,
     packet: &PublishPacket,
     return_code: u8,
 ) {
@@ -648,13 +679,13 @@ pub fn mqtt_sn_send_puback(
     };
 
     info!("Sending PUBACK packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-fn mqtt_sn_send_pingreq(socket: &UdpSocket) {
+fn mqtt_sn_send_pingreq(sensor_net: &mut dyn SensorNetwork) {
     let msg_type = MQTT_SN_PINGREQ;
     let length = 0x02;
     let packet = PingreqPacket { length, msg_type };
     info!("Sending PINGREQ packet: {:?}", packet);
-    mqtt_sn_send_packet(socket, &packet);
+    mqtt_sn_send_packet(sensor_net, &packet);
 }

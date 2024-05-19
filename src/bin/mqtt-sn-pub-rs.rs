@@ -3,9 +3,10 @@ extern crate mqtt_sn_tools_rs;
 use std::io::BufReader;
 use std::io::BufRead;
 use std::fs::File;
-use std::net::UdpSocket;
+
 use log::{
     warn,
+    info,
     error,
     debug,
     LevelFilter
@@ -35,7 +36,12 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_receive_regack,
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::mqtt_sn_create_connection;
+use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
+    SensorNetwork,
+    SensorNetworkType,
+    SensorNetworkInitArgs,
+    create_sensor_network,
+};
 
 
 fn usage() {
@@ -60,6 +66,8 @@ fn usage() {
     eprintln!("  --fe           Enables Forwarder Encapsulation. MQTT-SN packets are encapsulated according to MQTT-SN Protocol Specification v1.2, chapter 5.5 Forwarder Encapsulation.");
     eprintln!("  --wlnid        If Forwarder Encapsulation is enabled, wireless node ID for this client. Defaults to process id.");
     eprintln!("  --cport <port> Source port for outgoing packets. Uses port in ephemeral range if not specified or set to {}.", defaults.source_port);
+    eprintln!("  --loop-freq    Frequency in Hz to send messages. Defaults to 0 (disabled).");
+    eprintln!("  --count        Number of messages to send in loop. Defaults to 0 (loops forever).");
     std::process::exit(1);
 }
 
@@ -137,6 +145,15 @@ fn parse_args() -> Settings{
                 i += 1;
                 settings.source_port = args[i].parse().unwrap();
             }
+            
+            "--loop-freq" => {
+                i += 1;
+                settings.loop_frequency = args[i].parse::<u64>().unwrap();
+            }
+            "--count" =>{
+                i += 1;
+                settings.loop_count = args[i].parse::<u64>().unwrap();
+            }
             _ => {
                 error!("Unknown option: {}", args[i]);
                 usage();
@@ -179,12 +196,18 @@ fn parse_args() -> Settings{
         usage();
     }
 
+    // Count only makes sense if loop_frequency is set
+    if settings.loop_count > 0 && settings.loop_frequency == 0 {
+        error!("Loop count provided without loop frequency.");
+        usage();
+    }
+
     settings
 }
 
 
 // Placeholder for publish_file
-fn publish_file(socket: &UdpSocket, settings: &Settings) {
+fn publish_file(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
     let mut message: String;
     // Open the file
     // If it is -, read from STDIN
@@ -213,7 +236,7 @@ fn publish_file(socket: &UdpSocket, settings: &Settings) {
                 message = line;
             }
             // Publish
-            mqtt_sn_send_publish(socket, &settings, &message);
+            mqtt_sn_send_publish(sensor_net, &settings, &message);
         }
     } else {
         // Read the file up to MQTT_SN_MAX_PAYLOAD_LENGTH
@@ -227,7 +250,7 @@ fn publish_file(socket: &UdpSocket, settings: &Settings) {
         // Publish
         let message = String::from_utf8(buffer).expect("Failed to convert buffer to string.");
         // Publish
-        mqtt_sn_send_publish(socket, &settings, message.as_str());
+        mqtt_sn_send_publish(sensor_net, &settings, message.as_str());
     }
 }
 
@@ -254,13 +277,21 @@ fn main(){
     // Print the settings
     debug!("{:?}", settings);
 
-    // First open a UDP socket
-    let socket: UdpSocket = mqtt_sn_create_connection(&settings);
+    // First create a connection
+    let sensor_net_args = SensorNetworkInitArgs::UDP {
+        source_address: format!("0.0.0.0:{}", settings.source_port),
+        destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
+        timeout: settings.timeout,
+    };
+    let mut boxed_sensor_net = create_sensor_network(SensorNetworkType::UDP, sensor_net_args);
+
+    let sensor_net = &mut *boxed_sensor_net;
+    sensor_net.initialize();
 
     if settings.qos >= 0 {
         // Send a CONNECT message
-        mqtt_sn_send_connect(&socket, &settings, true);
-        mqtt_sn_wait_for(&socket, MQTT_SN_CONNACK, &settings);
+        mqtt_sn_send_connect(sensor_net, &settings, true);
+        mqtt_sn_wait_for(sensor_net, MQTT_SN_CONNACK, &settings);
         
         // Then check if the topic is a pre-defined topic ID
         if settings.topic_id != 0 {
@@ -273,23 +304,44 @@ fn main(){
             settings.topic_id = ((settings.topic.as_bytes()[0] as u16) << 8) | (settings.topic.as_bytes()[1] as u16);
         } else if settings.qos >= 0 {
             // Send a REGISTER message
-            mqtt_sn_send_register(&socket, &settings);
-            mqtt_sn_receive_regack(&socket, &settings);
+            mqtt_sn_send_register(sensor_net, &settings);
+            mqtt_sn_receive_regack(sensor_net, &settings);
             settings.topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
         }
 
-       // Publish the message to the topic
-         if settings.file != "" {
-              publish_file(&socket, &settings);
-         } else {
-              mqtt_sn_send_publish(&socket, &settings, ""); 
-         }
+        if settings.loop_count  > 0 {
+            info!("Loop count set to {}.", settings.loop_count);
+        }
 
-         // Disconnect
-         if settings.qos >= 0 {
-             mqtt_sn_send_disconnect(&socket, &settings);
-             mqtt_sn_receive_disconnect(&socket, &settings);
-         }
+        if settings.loop_frequency > 0 {
+            info!("Loop frequency set to {} Hz.", settings.loop_frequency);
+        }
 
+        loop {
+            if settings.loop_count > 0 {
+                settings.loop_count -= 1;
+                if settings.loop_count == 0 {
+                    break;
+                }
+            }
+            // Publish the message to the topic
+            if settings.file != "" {
+                publish_file(sensor_net, &settings);
+            } else {
+                mqtt_sn_send_publish(sensor_net, &settings, ""); 
+            }
+
+            if settings.loop_frequency == 0 {
+                break;
+            }
+            // Sleep for the loop frequency
+            let sleep_time_in_us = 1_000_000 / settings.loop_frequency as u64;
+            std::thread::sleep(std::time::Duration::from_micros(sleep_time_in_us as u64));
+        }
+        // Disconnect
+        if settings.qos >= 0 {
+            mqtt_sn_send_disconnect(sensor_net, &settings);
+            mqtt_sn_receive_disconnect(sensor_net, &settings);
+        }
     }
 }

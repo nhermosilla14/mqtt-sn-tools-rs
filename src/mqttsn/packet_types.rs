@@ -552,10 +552,15 @@ impl Packet for DisconnectPacket {
     }
 
     fn from_bytes(bytes: &Vec<u8>) -> Self where Self: Sized {
-        DisconnectPacket {
+        let length = bytes[0] as usize;
+        let mut duration: u16 = 0;
+        if length == 0x04 {
+                duration = u16::from_be_bytes([bytes[2], bytes[3]]);
+        } 
+        return DisconnectPacket {
             length: bytes[0],
             msg_type: bytes[1],
-            duration: u16::from_be_bytes([bytes[2], bytes[3]]),
+            duration: duration,
         }
     }
 

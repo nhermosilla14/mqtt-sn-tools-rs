@@ -1,13 +1,12 @@
 extern crate mqtt_sn_tools_rs;
 
-use std::str;
-use std::net::UdpSocket;
 use log::{
     warn,
     error,
     debug,
     LevelFilter
 };
+
 use env_logger::Builder;
 
 use mqtt_sn_tools_rs::mqttsn::constants::{
@@ -16,6 +15,7 @@ use mqtt_sn_tools_rs::mqttsn::constants::{
     MQTT_SN_ACCEPTED,
 };
 
+use std::str;
 
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
@@ -34,7 +34,12 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_send_disconnect,
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::mqtt_sn_create_connection;
+use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
+    SensorNetwork,
+    SensorNetworkInitArgs,
+    SensorNetworkType,
+    create_sensor_network,
+};
 
 
 fn usage() {
@@ -179,21 +184,28 @@ fn main(){
     // Print the settings
     debug!("{:?}", settings);
 
-    // First open a UDP socket
-    let socket: UdpSocket = mqtt_sn_create_connection(&settings);
+    // First open a connection
+    let mut boxed_sensor_network: Box<dyn SensorNetwork> = create_sensor_network(SensorNetworkType::UDP, SensorNetworkInitArgs::UDP {
+        source_address: format!("0.0.0.0:{}", settings.source_port),
+        destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
+        timeout: settings.keep_alive as u64,
+    });
+
+    let sensor_net = &mut *boxed_sensor_network;
+    sensor_net.initialize();
 
     settings.timeout = settings.keep_alive as u64 / 2;
 
     // Send a CONNECT message
     debug!("Sending CONNECT message");
-    mqtt_sn_send_connect(&socket, &settings, true);
-    mqtt_sn_receive_connack(&socket, &settings);
+    mqtt_sn_send_connect(sensor_net, &settings, true);
+    mqtt_sn_receive_connack(sensor_net, &settings);
 
     // Subscribe to the topics by topic name
     for topic in settings.topic_list.iter() {
         debug!("Subscribing to topic: {}", topic);
-        mqtt_sn_send_subscribe_topic_name(&socket, &settings, topic);
-        let topic_id = mqtt_sn_receive_suback(&socket, &settings);
+        mqtt_sn_send_subscribe_topic_name(sensor_net, &settings, topic);
+        let topic_id = mqtt_sn_receive_suback(sensor_net, &settings);
 
         if topic_id != 0  && topic.len() > 2 {
             settings.topic_map.insert(topic_id, topic.clone());
@@ -203,14 +215,22 @@ fn main(){
     // Subscribe to the topics by topic ID
     for topic_id in settings.topic_id_list.iter() {
         debug!("Subscribing to topic ID: {}", topic_id);
-        mqtt_sn_send_subscribe_topic_id(&socket, &settings, *topic_id);
-        mqtt_sn_receive_suback(&socket, &settings);
+        mqtt_sn_send_subscribe_topic_id(sensor_net, &settings, *topic_id);
+        mqtt_sn_receive_suback(sensor_net, &settings);
     }
 
     loop {
         // Receive messages
         debug!("Waiting for a message");
-        let packet = mqtt_sn_receive_publish(&socket, &settings);
+        let unsafe_packet = mqtt_sn_receive_publish(sensor_net, &settings);
+
+        let packet = match unsafe_packet {
+            Some(packet) => packet,
+            None => {
+                warn!("Received an empty packet. Ignoring.");
+                continue;
+            }
+        };
 
         if packet.data.len() == 0 {
             warn!("Received an empty packet. Ignoring.");
@@ -221,10 +241,10 @@ fn main(){
         let msg_qos = packet.flags & MQTT_SN_FLAG_QOS_MASK;
         if msg_qos == MQTT_SN_FLAG_QOS_1 {
             // Send a PUBACK
-            mqtt_sn_send_puback(&socket, &packet, MQTT_SN_ACCEPTED);
+            mqtt_sn_send_puback(sensor_net, &packet, MQTT_SN_ACCEPTED);
         //} else if msg_qos == MQTT_SN_FLAG_QOS_2 {
         //    // Send a PUBREC
-        //    mqtt_sn_send_pubrec(&socket, &settings, &packet);
+        //    mqtt_sn_send_pubrec(sensor_net, &settings, &packet);
         }
         // Print the message
         println!("{}", message);
@@ -236,8 +256,8 @@ fn main(){
     }
 
     // Send a DISCONNECT message
-    mqtt_sn_send_disconnect(&socket, &settings);
+    mqtt_sn_send_disconnect(sensor_net, &settings);
     debug!("Sending DISCONNECT message");
-    mqtt_sn_receive_disconnect(&socket, &settings);
+    mqtt_sn_receive_disconnect(sensor_net, &settings);
     
 }
