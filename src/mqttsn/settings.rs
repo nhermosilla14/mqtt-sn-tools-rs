@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use crate::mqttsn::constants::{
     MQTT_SN_DEFAULT_PORT,
+    MQTT_SN_DEFAULT_SERIAL_PORT,
+    MQTT_SN_DEFAULT_BAUDRATE,
     MQTT_SN_DEFAULT_KEEP_ALIVE,
     MQTT_SN_DEFAULT_TIMEOUT,
     MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH,
@@ -18,6 +20,8 @@ use crate::mqttsn::constants::{
 pub struct Settings {
     pub mqtt_sn_host: String,
     pub mqtt_sn_port: u16,
+    pub serial_port: String,
+    pub baudrate: u32,
     pub keep_alive: u16,
     pub timeout: u64,
     pub sleep_duration: u64,
@@ -60,6 +64,8 @@ pub fn default_settings() -> Settings {
     Settings {
         mqtt_sn_host: String::from("127.0.0.1"),
         mqtt_sn_port: MQTT_SN_DEFAULT_PORT,
+        serial_port: String::from(MQTT_SN_DEFAULT_SERIAL_PORT),
+        baudrate: MQTT_SN_DEFAULT_BAUDRATE,
         keep_alive: MQTT_SN_DEFAULT_KEEP_ALIVE,
         timeout: MQTT_SN_DEFAULT_TIMEOUT,
         sleep_duration: 0,
