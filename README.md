@@ -27,7 +27,7 @@ Since this aims for feature parity with the original tools, the currently suppor
 - [X] Clean / unclean sessions
 - [X] Manual and automatic client ID generation
 - [X] Pre-defined topic IDs and short topic names
-- [?] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
+- [ ] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
 
 ## Subscriber (mqtt-sn-sub-rs)
 
@@ -40,7 +40,7 @@ Since this aims for feature parity with the original tools, the currently suppor
 - [X] Manual and automatic client ID generation
 - [X] Displaying topic name with wildcard subscriptions
 - [X] Pre-defined topic IDs and short topic names
-- [?] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
+- [ ] Forwarder encapsulation according to MQTT-SN Protocol Specification v1.2.
 
 ## Serial port bridge (mqtt-sn-serial-bridge-rs)
 
