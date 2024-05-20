@@ -163,6 +163,15 @@ This is still a WIP
 
 This is still a WIP.
 
+
+# Roadmap
+- [ ] Implement the serial port bridge.
+- [ ] Implement the UDP dumping tool.
+- [ ] Implement the serial publisher and subscriber.
+- [ ] General refactoring and cleanup.
+- [ ] Add proper tests.
+- [ ] Add proper documentation.
+
 # License
 
 This project is licensed under the [GPLv3 License].

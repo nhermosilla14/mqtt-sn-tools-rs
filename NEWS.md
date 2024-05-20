@@ -8,6 +8,7 @@ Version 0.0.2 (2024-05-19)
 - Fix issue when receiving network timeout error
 - Add first steps to support raw serial communication
 - Add extra options to the CLI, allowing to publish in a loop
+- Add serial publisher
 
 
 Version 0.0.1 (2024-05-13)
