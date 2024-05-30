@@ -354,7 +354,11 @@ pub fn mqtt_sn_receive_packet(sensor_net: &mut dyn SensorNetwork) -> Option<Box<
             warn!("Failed to read from sensor_net: {}", error_message);
             return None;
         }
-    }    
+    }
+    if buffer.len() == 0 {
+        warn!("Failed to read from sensor_net: buffer is empty");
+        return None;
+    }
 
     // Check the number of bytes read
     let mut bytes_read = buffer[0] as usize;
