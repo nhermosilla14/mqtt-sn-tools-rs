@@ -1,17 +1,16 @@
 // Network abstractions for MQTT-SN
-// 
+//
 // This module defines the network abstractions for MQTT-SN.
-// They allow the user to define their own network layer for MQTT-SN, 
+// They allow the user to define their own network layer for MQTT-SN,
 // by implementing the SensorNetwork trait. It is inspired by the
 // network abstractions in the PAHO MQTT-SN client library.
 
-
+use log::{debug, error, info};
 use std::{net::UdpSocket, time::Duration};
-use log::{info, error};
 // SerialPort
-use serialport::{SerialPort, DataBits, FlowControl, Parity};
+use serialport::{DataBits, FlowControl, Parity, SerialPort};
 use std::io::prelude::*;
-
+use std::io::Read;
 // SensorNetwork trait
 pub trait SensorNetwork {
     fn initialize(&self);
@@ -21,7 +20,6 @@ pub trait SensorNetwork {
     fn get_timeout(&self) -> u64;
     fn close(&self);
 }
-
 
 // SensorNetworkType and SensorNetworkInitArgs
 
@@ -44,35 +42,50 @@ pub enum SensorNetworkInitArgs {
         parity: Parity,
         data_bits: DataBits,
         flow_control: FlowControl,
-        timeout: u64,
+        timeout: Duration,
     },
 }
 
 // A SensorNetwork factory function
 
 // A function to create a sensor network based on the type
-pub fn create_sensor_network(network_type: SensorNetworkType, init_args: SensorNetworkInitArgs) -> Box<dyn SensorNetwork> {
+pub fn create_sensor_network(
+    network_type: SensorNetworkType,
+    init_args: SensorNetworkInitArgs,
+) -> Box<dyn SensorNetwork> {
     match network_type {
-        SensorNetworkType::UDP => {
-            match init_args {
-                SensorNetworkInitArgs::UDP { source_address, destination_address, timeout } => {
-                    Box::new(UDPSensorNetwork::new(&source_address, &destination_address, timeout))
-                }
-                _ => panic!("Invalid initialization arguments"),
-            }
-        }
-        SensorNetworkType::SerialPort => {
-            match init_args {
-                SensorNetworkInitArgs::SerialPort { port_name, baud_rate, parity, data_bits, flow_control, timeout } => {
-                    Box::new(SerialPortSensorNetwork::new(port_name, baud_rate, parity, data_bits, flow_control, timeout))
-                }
-                _ => panic!("Invalid initialization arguments"),
-            }
-        }
+        SensorNetworkType::UDP => match init_args {
+            SensorNetworkInitArgs::UDP {
+                source_address,
+                destination_address,
+                timeout,
+            } => Box::new(UDPSensorNetwork::new(
+                &source_address,
+                &destination_address,
+                timeout,
+            )),
+            _ => panic!("Invalid initialization arguments"),
+        },
+        SensorNetworkType::SerialPort => match init_args {
+            SensorNetworkInitArgs::SerialPort {
+                port_name,
+                baud_rate,
+                parity,
+                data_bits,
+                flow_control,
+                timeout,
+            } => Box::new(SerialPortSensorNetwork::new(
+                port_name,
+                baud_rate,
+                parity,
+                data_bits,
+                flow_control,
+                timeout,
+            )),
+            _ => panic!("Invalid initialization arguments"),
+        },
     }
 }
-
-
 
 // UDPSensorNetwork
 pub struct UDPSensorNetwork {
@@ -83,16 +96,11 @@ pub struct UDPSensorNetwork {
 }
 
 impl UDPSensorNetwork {
-    pub fn new(
-        source_address: &str,
-        destination_address: &str,
-        timeout: u64,
-    ) -> UDPSensorNetwork {
+    pub fn new(source_address: &str, destination_address: &str, timeout: u64) -> UDPSensorNetwork {
         UDPSensorNetwork {
             source_address: String::from(source_address),
             destination_address: String::from(destination_address),
-            socket: UdpSocket::bind(source_address)
-                .expect("Could not bind to address"),
+            socket: UdpSocket::bind(source_address).expect("Could not bind to address"),
             timeout,
         }
     }
@@ -105,21 +113,26 @@ impl SensorNetwork for UDPSensorNetwork {
 
     fn initialize(&self) {
         // Connect to the destination address
-        self.socket.connect(&self.destination_address)
+        self.socket
+            .connect(&self.destination_address)
             .expect("Could not connect to destination address");
 
         // Set the timeout
         if self.timeout > 0 {
-            self.socket.set_read_timeout(Some(std::time::Duration::from_secs(self.timeout)))
+            self.socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(self.timeout)))
                 .expect("Could not set read timeout");
         }
     }
 
     fn get_description(&self) -> String {
-        format!("UDP Sensor Network: Source: {}, Destination: {}", self.source_address, self.destination_address)
+        format!(
+            "UDP Sensor Network: Source: {}, Destination: {}",
+            self.source_address, self.destination_address
+        )
     }
 
-   fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
+    fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
         match self.socket.send(data) {
             Ok(size) => {
                 info!("Sent {} bytes", size);
@@ -143,8 +156,7 @@ impl SensorNetwork for UDPSensorNetwork {
     }
 }
 
-
-// SerialPortSensorNetwork
+// Alt SerialPort SensorNetwork
 
 pub struct SerialPortSensorNetwork {
     port_name: String,
@@ -152,7 +164,7 @@ pub struct SerialPortSensorNetwork {
     parity: Parity,
     data_bits: DataBits,
     flow_control: FlowControl,
-    timeout: u64,
+    timeout: Duration,
     port: Box<dyn SerialPort>,
 }
 
@@ -163,18 +175,13 @@ impl SerialPortSensorNetwork {
         parity: Parity,
         data_bits: DataBits,
         flow_control: FlowControl,
-        timeout: u64,
+        timeout: Duration,
     ) -> SerialPortSensorNetwork {
-        let mut parsed_timeout = Duration::from_secs(timeout);
-        if timeout == 0 {
-            // Set the timeout to the maximum value
-            parsed_timeout = Duration::from_secs(86400);
-        }
         let port = serialport::new(port_name.as_str(), baud_rate)
             .data_bits(data_bits)
             .parity(parity)
             .flow_control(flow_control)
-            .timeout(parsed_timeout)
+            //.timeout(timeout)
             .open()
             .expect("Could not open serial port");
 
@@ -190,9 +197,9 @@ impl SerialPortSensorNetwork {
     }
 }
 
-impl SensorNetwork for SerialPortSensorNetwork {    
+impl SensorNetwork for SerialPortSensorNetwork {
     fn get_timeout(&self) -> u64 {
-        self.timeout
+        self.timeout.as_millis() as u64
     }
 
     fn initialize(&self) {
@@ -201,8 +208,9 @@ impl SensorNetwork for SerialPortSensorNetwork {
 
     fn get_description(&self) -> String {
         format!("Serial Port Sensor Network:\nPort: {}\nBaud Rate: {}\nParity: {:?}\nData Bits: {:?}\nFlow Control: {:?}\nTimeout: {}",
-        self.port_name, self.baud_rate, self.parity, self.data_bits, self.flow_control, self.timeout)
+        self.port_name, self.baud_rate, self.parity, self.data_bits, self.flow_control, self.timeout.as_millis() as u64)
     }
+
     fn send(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
         match self.port.write_all(data) {
             Ok(()) => {
@@ -213,16 +221,72 @@ impl SensorNetwork for SerialPortSensorNetwork {
                 error!("Error sending data: {}", e);
                 Err(e)
             }
-        } 
+        }
     }
 
-    fn receive(&mut self) -> Result<Vec<u8>, std::io::Error>{
-        let mut buffer = [0; 1024];
-        let size = self.port.read(&mut buffer)?;
-        Ok(buffer[0..size].to_vec())
+    fn receive(&mut self) -> Result<Vec<u8>, std::io::Error> {
+        let mut serial_buf: Vec<u8> = vec![0; 255];
+        let mut message_size = 0;
+        let mut pos: usize = 0;
+        let mut bytes_read: Result<usize, std::io::Error>;
+        loop {
+            // Read message size, only the first byte
+            while message_size == 0 {
+                bytes_read = self.port.read(&mut serial_buf);
+                match bytes_read {
+                    Ok(0) => {
+                        debug!("Error: No bytes read");
+                        continue;
+                    }
+                    Ok(_) => {
+                        ();
+                    }
+                    Err(_) => {
+                        debug!("Timeout reached");
+                        break;
+                    }
+                }
+                let safe_bytes_read = bytes_read.unwrap();
+                debug!("Bytes read: {}", safe_bytes_read);
+                if safe_bytes_read > 0 {
+                    message_size = serial_buf[0] as usize;
+                    pos = safe_bytes_read;
+                }
+            }
+            // Read the rest of the message
+            let _ = self.port.set_timeout(self.timeout);
+            while pos < message_size {
+                bytes_read = self.port.read(&mut serial_buf[pos..]);
+                match bytes_read {
+                    Ok(0) => {
+                        debug!("Error: No more bytes read");
+                        break;
+                    }
+                    Ok(_) => {
+                        ();
+                    }
+                    Err(_) => {
+                        debug!("Timeout reached");
+                        break;
+                    }
+                }
+                let safe_bytes_read = bytes_read.unwrap();
+                debug!("Bytes read: {}", safe_bytes_read);
+                pos += safe_bytes_read;
+            }
+            // If the message is complete, return it
+            if pos >= message_size {
+                return Ok(serial_buf[0..message_size].to_vec());
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Error reading message",
+                ));
+            }
+        }
     }
 
     fn close(&self) {
-       // Nothing to do here 
+        // Nothing to do here
     }
 }
