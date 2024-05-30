@@ -317,9 +317,6 @@ fn main(){
         loop {
             if settings.loop_count > 0 {
                 settings.loop_count -= 1;
-                if settings.loop_count == 0 {
-                    break;
-                }
             }
             // Publish the message to the topic
             if settings.file != "" {
@@ -334,6 +331,10 @@ fn main(){
             // Sleep for the loop frequency
             let sleep_time_in_us = 1_000_000 / settings.loop_frequency as u64;
             std::thread::sleep(std::time::Duration::from_micros(sleep_time_in_us as u64));
+
+            if settings.loop_count == 0 {
+                break;
+            }
         }
         // Disconnect
         if settings.qos >= 0 {

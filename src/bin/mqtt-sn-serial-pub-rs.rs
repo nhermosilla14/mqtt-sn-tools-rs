@@ -54,7 +54,7 @@ fn usage() {
     eprintln!("  -m <message>   Message payload to send.");
     eprintln!("  -l             Read from STDIN, one message per line.");
     eprintln!("  -n             Send a null (zero length) message.");
-    eprintln!("  -p <port>      Network port to connect to. Defaults to '{}'.", defaults.serial_port);
+    eprintln!("  -p <port>      Serial port to connect to. Defaults to '{}'.", defaults.serial_port);
     eprintln!("  -b <baudrate>  Baud rate for serial connection. Defaults to {}.", defaults.baudrate);
     eprintln!("  -q <qos>       Quality of Service value (0, 1 or -1). Defaults to {}.", defaults.qos);
     eprintln!("  -r             Message should be retained.");
@@ -66,6 +66,8 @@ fn usage() {
     eprintln!("  --cport <port> Source port for outgoing packets. Uses port in ephemeral range if not specified or set to {}.", defaults.source_port);
     eprintln!("  --loop-freq    Frequency in Hz to send messages. Defaults to 0 (disabled).");
     eprintln!("  --count        Number of messages to send in loop. Defaults to 0 (loops forever).");
+    eprintln!("  --net-timeout  The timeout given to the network backend for reading operations.");
+    eprintln!("  --net-retries  The number of retries for network operations.");
     std::process::exit(1);
 }
 
@@ -122,7 +124,8 @@ fn parse_args() -> Settings{
                 settings.retain = true;
             }
             "-s" => {
-                settings.read_stdin = true;
+                settings.file = "-".to_string();
+                settings.one_message_per_line = false;
             }
             "-t" => {
                 i += 1;
@@ -151,6 +154,14 @@ fn parse_args() -> Settings{
             "--count" =>{
                 i += 1;
                 settings.loop_count = args[i].parse::<u64>().unwrap();
+            }
+            "--net-timeout" => {
+                i += 1;
+                settings.network_timeout = args[i].parse::<u64>().unwrap();
+            }
+            "--net-retries" => {
+                i += 1;
+                settings.network_retries = args[i].parse::<u8>().unwrap();
             }
             _ => {
                 error!("Unknown option: {}", args[i]);
@@ -241,7 +252,7 @@ fn publish_file(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
         let mut buffer = vec![0; MQTT_SN_MAX_PAYLOAD_LENGTH];
         let bytes_read = file.read(&mut buffer).expect("Failed to read file.");
 
-        // Strip the buffer of any null bytes
+        // Truncate the buffer if the file is shorter than MQTT_SN_MAX_PAYLOAD_LENGTH
         if bytes_read < MQTT_SN_MAX_PAYLOAD_LENGTH {
             buffer.truncate(bytes_read);
         }
@@ -283,7 +294,7 @@ fn main(){
             parity: serialport::Parity::None,
             data_bits: serialport::DataBits::Eight,
             flow_control: serialport::FlowControl::None,
-            timeout: 10
+            timeout: std::time::Duration::from_millis(settings.network_timeout),
         };
     let mut boxed_sensor_net = create_sensor_network(SensorNetworkType::SerialPort, sensor_net_args);
 
@@ -310,20 +321,20 @@ fn main(){
             settings.topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
         }
 
+        let mut sleep_time_in_us = 0;
+
         if settings.loop_count  > 0 {
             info!("Loop count set to {}.", settings.loop_count);
         }
 
         if settings.loop_frequency > 0 {
             info!("Loop frequency set to {} Hz.", settings.loop_frequency);
+            sleep_time_in_us = 1_000_000 / settings.loop_frequency as u64;
         }
 
         loop {
             if settings.loop_count > 0 {
                 settings.loop_count -= 1;
-                if settings.loop_count == 0 {
-                    break;
-                }
             }
             // Publish the message to the topic
             if settings.file != "" {
@@ -336,8 +347,11 @@ fn main(){
                 break;
             }
             // Sleep for the loop frequency
-            let sleep_time_in_us = 1_000_000 / settings.loop_frequency as u64;
             std::thread::sleep(std::time::Duration::from_micros(sleep_time_in_us as u64));
+
+            if settings.loop_count == 0 {
+                break;
+            }
         }
         // Disconnect
         if settings.qos >= 0 {
