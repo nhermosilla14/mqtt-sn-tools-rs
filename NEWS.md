@@ -1,10 +1,19 @@
 Release History
 ===============
 
+Version 0.0.3 (2024-05-26)
+--------------------------
+- Add serial subscriber
+- Many fixes and improvements in serial communication
+- Fix issue when receiving network timeout error
+- Fix issue with wrong count in loop mode
+
+
+
 Version 0.0.2 (2024-05-19)
 --------------------------
 
-- Add SerialNetwork trait to support multiple communication methods
+- Add SensorNetwork trait to support multiple communication methods
 - Fix issue when receiving network timeout error
 - Add first steps to support raw serial communication
 - Add extra options to the CLI, allowing to publish in a loop
