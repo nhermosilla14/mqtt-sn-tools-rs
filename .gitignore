@@ -1,3 +1,4 @@
 /target
 *.exe
 **/**-next*.rs
+.vscode/settings.json
