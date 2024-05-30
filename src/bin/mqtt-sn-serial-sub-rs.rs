@@ -39,11 +39,11 @@ fn usage() {
     eprintln!("  -1             exit after receiving a single message.");
     eprintln!("  -c             disable 'clean session' (store subscription and pending messages when client disconnects).");
     eprintln!("  -d             Increase debug level by one. -d can occur multiple times.");
-    eprintln!("  -h <host>      MQTT-SN host to connect to. Defaults to '{}'.", defaults.mqtt_sn_host);
     eprintln!("  -i <clientid>  ID to use for this client. Defaults to 'mqtt-sn-tools-' with process id.");
     eprintln!("  -k <keepalive> keep alive in seconds for this client. Defaults to {}.", defaults.keep_alive);
     eprintln!("  -e <sleep>     sleep duration in seconds when disconnecting. Defaults to {}.", defaults.sleep_duration);
-    eprintln!("  -p <port>      Network port to connect to. Defaults to '{}'.", defaults.mqtt_sn_port);
+    eprintln!("  -p <port>      Serial port to connect to. Defaults to '{}'.", defaults.serial_port);
+    eprintln!("  -b <baudrate>  Baudrate for serial port. Defaults to '{}'.", defaults.baudrate);
     eprintln!("  -q <qos>       QoS level to subscribe with (0 or 1). Defaults to {}.", defaults.qos);
     eprintln!("  -t <topic>     MQTT-SN topic name to subscribe to. It may repeat multiple times.");
     eprintln!("  -T <topicid>   Pre-defined MQTT-SN topic ID to subscribe to. It may repeat multiple times.");
@@ -70,10 +70,6 @@ fn parse_args() -> Settings{
             "-d" => {
                 settings.debug_level += 1;
             },
-            "-h" => {
-                i += 1;
-                settings.mqtt_sn_host = args[i].clone();
-            },
             "-i" => {
                 i += 1;
                 settings.client_id = args[i].clone();
@@ -88,7 +84,11 @@ fn parse_args() -> Settings{
             },
             "-p" => {
                 i += 1;
-                settings.mqtt_sn_port = args[i].parse::<u16>().expect("Failed to parse port.");
+                settings.serial_port = args[i].parse().expect("Failed to parse port.");
+            },
+            "-b" => {
+                i += 1;
+                settings.baudrate = args[i].parse::<u32>().expect("Failed to parse baudrate.");
             },
             "-q" => {
                 i += 1;
@@ -176,11 +176,18 @@ fn main(){
     // Print the settings
     debug!("{:?}", settings);
     // First open a connection
-    let mut boxed_sensor_network: Box<dyn SensorNetwork> = create_sensor_network(SensorNetworkType::UDP, SensorNetworkInitArgs::UDP {
-        source_address: format!("0.0.0.0:{}", settings.source_port),
-        destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
-        timeout: settings.timeout as u64,
-    });
+    let mut boxed_sensor_network: Box<dyn SensorNetwork> = 
+        create_sensor_network(
+            SensorNetworkType::SerialPort,
+            SensorNetworkInitArgs::SerialPort {
+                port_name: settings.serial_port.clone(),
+                baud_rate: settings.baudrate,
+                parity: serialport::Parity::None,
+                data_bits: serialport::DataBits::Eight,
+                flow_control: serialport::FlowControl::None,
+                timeout: std::time::Duration::from_millis(settings.network_timeout as u64),
+            }
+        );
 
     let sensor_net = &mut *boxed_sensor_network;
     sensor_net.initialize();
@@ -235,6 +242,7 @@ fn main(){
         //    // Send a PUBREC
         //    mqtt_sn_send_pubrec(sensor_net, &settings, &packet);
         }
+
         if settings.single_message {
             break;
         }
