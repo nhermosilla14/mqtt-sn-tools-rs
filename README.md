@@ -76,7 +76,7 @@ Now, given I was already writting a whole new set of tools, I though I might als
 
 - [X] Agnostic network layer. The original tools are quite tied to the UDP protocol, which is fine for most cases. But I wanted to make it possible to use other network protocols, such as TCP or even serial connections. This is done by defining a trait for the network layer, which is implemented by the UDP network layer(and there's also a WIP serial implementation). This is already implemented, and it's quite easy to implement new network layers.
 
-- [ ] Serial publisher and subscriber. The original set of tools provides a bridge, which is quite useful to connect a device sendind and receiving data over a serial port with a gateway listening over UDP. This additional tool will help debug connections and provide a way to send a raw stream of data over a serial connection (to emulate a SN device, and other possible use cases).
+- [X] NEW!! Serial publisher and subscriber. The original set of tools provides a bridge, which is quite useful to connect a device sending and receiving data over a serial port with a gateway listening over UDP. This additional tool will help debug connections and provide a way to send a raw stream of data over a serial connection (to emulate a SN device, and other possible use cases).
 
 
 # Limitations
@@ -108,7 +108,7 @@ cargo build
 
 # Usage
 
-## Publishing
+## UDP Publishing
 
     Usage: mqtt-sn-pub-rs [opts] -t <topic> -m <message>
 
@@ -136,7 +136,7 @@ cargo build
       --count        Number of messages to send in loop. Defaults to 0 (loops forever).
 
 
-## Subscribing
+## UDP Subscribing
 
       -1             exit after receiving a single message.
       -c             disable 'clean session' (store subscription and pending messages when client disconnects).
