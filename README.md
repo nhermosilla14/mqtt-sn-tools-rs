@@ -1,6 +1,6 @@
 # mqtt-sn-tools-rs
 A reimplementation of mqtt-sn-tools written in Rust.
-
+[![Rust](https://github.com/nhermosilla14/mqtt-sn-tools-rs/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/nhermosilla14/mqtt-sn-tools-rs/actions/workflows/rust.yml)
 
 MQTT-SN Tools in Rust
 =====================
