@@ -20,13 +20,13 @@ use mqtt_sn_tools_rs::mqttsn::constants::{
     MQTT_SN_TOPIC_TYPE_SHORT,
 };
 
-use mqtt_sn_tools_rs::mqttsn::pubsub::mqtt_sn_connect;
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
     default_settings,
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::{
+    mqtt_sn_connect,
     mqtt_sn_send_publish,
     mqtt_sn_send_register,
     mqtt_sn_send_disconnect,
@@ -34,13 +34,13 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_receive_regack,
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
-    SensorNetwork,
-    SensorNetworkType,
-    SensorNetworkInitArgs,
-    create_sensor_network,
-};
+use mqtt_sn_tools_rs::mqttsn::sensor_nets::create_sensor_net;
 
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetInitArgs;
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetType;
+use mqtt_sn_tools_rs::mqttsn::traits::SensorNet;
+
+use serial2;
 
 fn usage() {
     let defaults = default_settings();
@@ -216,7 +216,7 @@ fn parse_args() -> Settings{
 
 
 // Placeholder for publish_file
-fn publish_file(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+fn publish_file(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     let mut message: String;
     // Open the file
     // If it is -, read from STDIN
@@ -287,20 +287,19 @@ fn main(){
     debug!("{:?}", settings);
 
     // First create a connection
-    let sensor_net_args = 
-        SensorNetworkInitArgs::SerialPort {
-            port_name: settings.serial_port.clone(),
-            baud_rate: settings.baudrate,
-            parity: serialport::Parity::None,
-            data_bits: serialport::DataBits::Eight,
-            flow_control: serialport::FlowControl::None,
-            timeout: std::time::Duration::from_millis(settings.network_timeout),
-        };
-    let mut boxed_sensor_net = create_sensor_network(SensorNetworkType::SerialPort, sensor_net_args);
-
+    let sensor_net_args = SensorNetInitArgs::Serial2 {
+        port_name: settings.serial_port.clone(),
+        baud_rate: settings.baudrate,
+        parity: serial2::Parity::None,
+        data_bits: serial2::CharSize::Bits8,
+        flow_control: serial2::FlowControl::None,
+        timeout: settings.network_timeout,
+    };
+    let mut boxed_sensor_net = create_sensor_net(SensorNetType::Serial2, sensor_net_args);
     let sensor_net = &mut *boxed_sensor_net;
-    sensor_net.initialize();
 
+    sensor_net.init();
+ 
     if settings.qos >= 0 {
         // Send a CONNECT message
         mqtt_sn_connect(sensor_net, &settings);

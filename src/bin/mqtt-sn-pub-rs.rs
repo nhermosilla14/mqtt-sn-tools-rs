@@ -20,13 +20,14 @@ use mqtt_sn_tools_rs::mqttsn::constants::{
     MQTT_SN_TOPIC_TYPE_SHORT,
 };
 
-use mqtt_sn_tools_rs::mqttsn::pubsub::mqtt_sn_connect;
+use mqtt_sn_tools_rs::mqttsn::sensor_nets::create_sensor_net;
 use mqtt_sn_tools_rs::mqttsn::settings::{
     Settings,
     default_settings,
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::{
+    mqtt_sn_connect,
     mqtt_sn_send_publish,
     mqtt_sn_send_register,
     mqtt_sn_send_disconnect,
@@ -34,12 +35,9 @@ use mqtt_sn_tools_rs::mqttsn::pubsub::{
     mqtt_sn_receive_regack,
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
-    SensorNetwork,
-    SensorNetworkType,
-    SensorNetworkInitArgs,
-    create_sensor_network,
-};
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetInitArgs;
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetType;
+use mqtt_sn_tools_rs::mqttsn::traits::SensorNet;
 
 
 fn usage() {
@@ -205,7 +203,7 @@ fn parse_args() -> Settings{
 
 
 // Placeholder for publish_file
-fn publish_file(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+fn publish_file(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     let mut message: String;
     // Open the file
     // If it is -, read from STDIN
@@ -276,15 +274,25 @@ fn main(){
     debug!("{:?}", settings);
 
     // First create a connection
-    let sensor_net_args = SensorNetworkInitArgs::UDP {
+    // let sensor_net_args = SensorNetworkInitArgs::UDP {
+    //     source_address: format!("0.0.0.0:{}", settings.source_port),
+    //     destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
+    //     timeout: settings.timeout,
+    // };
+    // let mut boxed_sensor_net = create_sensor_network(SensorNetworkType::UDP, sensor_net_args);
+
+    let sensor_net_args = SensorNetInitArgs::UDP {
         source_address: format!("0.0.0.0:{}", settings.source_port),
         destination_address: format!("{}:{}", settings.mqtt_sn_host, settings.mqtt_sn_port),
         timeout: settings.timeout,
     };
-    let mut boxed_sensor_net = create_sensor_network(SensorNetworkType::UDP, sensor_net_args);
-
+    let mut boxed_sensor_net = create_sensor_net(SensorNetType::UDP, sensor_net_args);
     let sensor_net = &mut *boxed_sensor_net;
-    sensor_net.initialize();
+
+    // let sensor_net = &mut *boxed_sensor_net;
+    // sensor_net.initialize();
+
+    sensor_net.init();
 
     if settings.qos >= 0 {
         // Send a CONNECT message

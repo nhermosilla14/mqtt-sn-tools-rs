@@ -58,11 +58,11 @@ use crate::mqttsn::settings::{
     set_topic_id, set_wireless_node_id, Settings,
 };
 
-use crate::mqttsn::network_abstractions::SensorNetwork;
+use crate::mqttsn::traits::sensor_net::SensorNet;
 
 // Generic send and receive functions
 
-pub fn mqtt_sn_send_packet(sensor_net: &mut dyn SensorNetwork, packet: &dyn Packet) -> Result<(), String>{
+pub fn mqtt_sn_send_packet(sensor_net: &mut dyn SensorNet, packet: &dyn Packet) -> Result<(), String>{
     // Use the length to get the bytes
     let packet_bytes = packet.as_bytes();
     let packet_length = packet_bytes[0];
@@ -181,7 +181,7 @@ pub fn mqtt_sn_rebuild_packet(buffer: &Vec<u8>) -> Option<Box<dyn Packet>> {
 }
 
 pub fn mqtt_sn_wait_for(
-    sensor_net: &mut dyn SensorNetwork,
+    sensor_net: &mut dyn SensorNet,
     packet_type: u8,
     settings: &Settings,
 ) -> Option<Box<dyn Packet>> {
@@ -244,7 +244,7 @@ pub fn mqtt_sn_wait_for(
     None
 }
 
-pub fn mqtt_receive_frwdencap_packet(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> Option<Box<dyn Packet>> {
+pub fn mqtt_receive_frwdencap_packet(sensor_net: &mut dyn SensorNet, settings: &Settings) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the data, with a maximun size given by:
     // MQTT_SN_MAX_PACKET_LENGTH
     // MQTT_SN_MAX_WIRELESS_NODE_ID_LENGTH
@@ -333,7 +333,7 @@ pub fn mqtt_receive_frwdencap_packet(sensor_net: &mut dyn SensorNetwork, setting
     }
 }
 
-pub fn mqtt_sn_receive_packet(sensor_net: &mut dyn SensorNetwork) -> Option<Box<dyn Packet>> {
+pub fn mqtt_sn_receive_packet(sensor_net: &mut dyn SensorNet) -> Option<Box<dyn Packet>> {
     // Create a buffer to hold the packet data
     let mut buffer: Vec<u8>;
     info!("Waiting to receive packet...");
@@ -387,7 +387,7 @@ pub fn mqtt_sn_receive_packet(sensor_net: &mut dyn SensorNetwork) -> Option<Box<
 
 // Connection wrapper
 
-pub fn mqtt_sn_connect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+pub fn mqtt_sn_connect(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     loop {
         // Send a CONNECT packet
         loop {
@@ -414,7 +414,7 @@ pub fn mqtt_sn_connect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) 
 }
 
 
-pub fn mqtt_sn_send_connect(sensor_net: &mut dyn SensorNetwork, settings: &Settings, clean_session: bool) -> Result<(), String>{
+pub fn mqtt_sn_send_connect(sensor_net: &mut dyn SensorNet, settings: &Settings, clean_session: bool) -> Result<(), String>{
     // Check client id length
     if settings.client_id.len() > MQTT_SN_MAX_CLIENT_ID_LENGTH {
         panic!(
@@ -448,7 +448,7 @@ pub fn mqtt_sn_send_connect(sensor_net: &mut dyn SensorNetwork, settings: &Setti
     mqtt_sn_send_packet(sensor_net, &packet)
 }
 
-pub fn mqtt_sn_receive_connack(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> Option<Box<ConnackPacket>>                           {
+pub fn mqtt_sn_receive_connack(sensor_net: &mut dyn SensorNet, settings: &Settings) -> Option<Box<ConnackPacket>>                           {
     match mqtt_sn_wait_for(sensor_net, MQTT_SN_CONNACK, settings) {
         // If some packet is received, it is a CONNACK packet for sure
         Some(packet) => {
@@ -463,7 +463,7 @@ pub fn mqtt_sn_receive_connack(sensor_net: &mut dyn SensorNetwork, settings: &Se
     }
 }
 
-pub fn mqtt_sn_send_register(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+pub fn mqtt_sn_send_register(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     // Check topic name length
     if settings.topic.len() > MQTT_SN_MAX_TOPIC_LENGTH {
         panic!(
@@ -495,7 +495,7 @@ pub fn mqtt_sn_send_register(sensor_net: &mut dyn SensorNetwork, settings: &Sett
     let _ = mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_receive_regack(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> RegackPacket {
+pub fn mqtt_sn_receive_regack(sensor_net: &mut dyn SensorNet, settings: &Settings) -> RegackPacket {
     let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_REGACK, settings);
 
     if let Some(regack) = packet.unwrap().as_regack() {
@@ -508,7 +508,7 @@ pub fn mqtt_sn_receive_regack(sensor_net: &mut dyn SensorNetwork, settings: &Set
     }
 }
 
-pub fn mqtt_sn_send_subscribe_topic_name(sensor_net: &mut dyn SensorNetwork, settings: &Settings, topic: &str) {
+pub fn mqtt_sn_send_subscribe_topic_name(sensor_net: &mut dyn SensorNet, settings: &Settings, topic: &str) {
     // Check topic name length
     if topic.len() > MQTT_SN_MAX_TOPIC_LENGTH {
         panic!(
@@ -548,7 +548,7 @@ pub fn mqtt_sn_send_subscribe_topic_name(sensor_net: &mut dyn SensorNetwork, set
     let _ = mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_send_subscribe_topic_id(sensor_net: &mut dyn SensorNetwork, settings: &Settings, topic_id: u16) {
+pub fn mqtt_sn_send_subscribe_topic_id(sensor_net: &mut dyn SensorNet, settings: &Settings, topic_id: u16) {
     let msg_type = MQTT_SN_SUBSCRIBE;
     let message_id = get_next_message_id();
     let mut flags = 0;
@@ -574,7 +574,7 @@ pub fn mqtt_sn_send_subscribe_topic_id(sensor_net: &mut dyn SensorNetwork, setti
     let _ = mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-pub fn mqtt_sn_receive_suback(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> u16 {
+pub fn mqtt_sn_receive_suback(sensor_net: &mut dyn SensorNet, settings: &Settings) -> u16 {
     let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_SUBACK, settings);
 
     if let Some(suback) = packet.unwrap().as_suback() {
@@ -602,7 +602,7 @@ pub fn mqtt_sn_receive_suback(sensor_net: &mut dyn SensorNetwork, settings: &Set
     }
 }
 
-pub fn mqtt_sn_send_disconnect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+pub fn mqtt_sn_send_disconnect(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     let msg_type = MQTT_SN_DISCONNECT;
     if settings.sleep_duration == 0 {
         let length = 0x02;
@@ -626,11 +626,11 @@ pub fn mqtt_sn_send_disconnect(sensor_net: &mut dyn SensorNetwork, settings: &Se
     }
 }
 
-pub fn mqtt_sn_receive_disconnect(sensor_net: &mut dyn SensorNetwork, settings: &Settings) {
+pub fn mqtt_sn_receive_disconnect(sensor_net: &mut dyn SensorNet, settings: &Settings) {
     mqtt_sn_wait_for(sensor_net, MQTT_SN_DISCONNECT, settings);
 }
 
-pub fn mqtt_sn_send_publish(sensor_net: &mut dyn SensorNetwork, settings: &Settings, message: &str) {
+pub fn mqtt_sn_send_publish(sensor_net: &mut dyn SensorNet, settings: &Settings, message: &str) {
     // Check message length
     const MAX_MESSAGE_LENGTH: usize = MQTT_SN_MAX_PACKET_LENGTH - 7;
     if message.len() > MAX_MESSAGE_LENGTH {
@@ -713,7 +713,7 @@ pub fn mqtt_sn_send_publish(sensor_net: &mut dyn SensorNetwork, settings: &Setti
     }
 }
 
-pub fn mqtt_sn_receive_publish(sensor_net: &mut dyn SensorNetwork, settings: &Settings) -> Option<PublishPacket> {
+pub fn mqtt_sn_receive_publish(sensor_net: &mut dyn SensorNet, settings: &Settings) -> Option<PublishPacket> {
     let packet = mqtt_sn_wait_for(sensor_net, MQTT_SN_PUBLISH, settings);
     match packet {
         Some(publish) => {
@@ -733,7 +733,7 @@ pub fn mqtt_sn_receive_publish(sensor_net: &mut dyn SensorNetwork, settings: &Se
 }
 
 pub fn mqtt_sn_send_puback(
-    sensor_net: &mut dyn SensorNetwork,
+    sensor_net: &mut dyn SensorNet,
     packet: &PublishPacket,
     return_code: u8,
 ) {
@@ -755,7 +755,7 @@ pub fn mqtt_sn_send_puback(
     let _ = mqtt_sn_send_packet(sensor_net, &packet);
 }
 
-fn mqtt_sn_send_pingreq(sensor_net: &mut dyn SensorNetwork) {
+fn mqtt_sn_send_pingreq(sensor_net: &mut dyn SensorNet) {
     let msg_type = MQTT_SN_PINGREQ;
     let length = 0x02;
     let packet = PingreqPacket { length, msg_type };

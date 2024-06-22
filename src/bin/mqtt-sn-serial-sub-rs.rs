@@ -21,15 +21,20 @@ use mqtt_sn_tools_rs::mqttsn::settings::{
 };
 
 use mqtt_sn_tools_rs::mqttsn::pubsub::{
-    mqtt_sn_connect, mqtt_sn_receive_disconnect, mqtt_sn_receive_publish, mqtt_sn_receive_suback, mqtt_sn_send_disconnect, mqtt_sn_send_puback, mqtt_sn_send_subscribe_topic_id, mqtt_sn_send_subscribe_topic_name
+    mqtt_sn_connect,
+    mqtt_sn_receive_disconnect,
+    mqtt_sn_receive_publish,
+    mqtt_sn_receive_suback,
+    mqtt_sn_send_disconnect,
+    mqtt_sn_send_puback,
+    mqtt_sn_send_subscribe_topic_id,
+    mqtt_sn_send_subscribe_topic_name
 };
 
-use mqtt_sn_tools_rs::mqttsn::network_abstractions::{
-    SensorNetwork,
-    SensorNetworkInitArgs,
-    SensorNetworkType,
-    create_sensor_network,
-};
+use mqtt_sn_tools_rs::mqttsn::sensor_nets::create_sensor_net;
+
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetInitArgs;
+use mqtt_sn_tools_rs::mqttsn::value_objects::SensorNetType;
 
 
 fn usage() {
@@ -176,23 +181,19 @@ fn main(){
     // Print the settings
     debug!("{:?}", settings);
     // First open a connection
-    let mut boxed_sensor_network: Box<dyn SensorNetwork> = 
-        create_sensor_network(
-            SensorNetworkType::SerialPort,
-            SensorNetworkInitArgs::SerialPort {
-                port_name: settings.serial_port.clone(),
-                baud_rate: settings.baudrate,
-                parity: serialport::Parity::None,
-                data_bits: serialport::DataBits::Eight,
-                flow_control: serialport::FlowControl::None,
-                timeout: std::time::Duration::from_millis(settings.network_timeout as u64),
-            }
-        );
+    let sensor_net_args = SensorNetInitArgs::Serial2 {
+        port_name: settings.serial_port.clone(),
+        baud_rate: settings.baudrate,
+        parity: serial2::Parity::None,
+        data_bits: serial2::CharSize::Bits8,
+        flow_control: serial2::FlowControl::None,
+        timeout: settings.network_timeout,
+    };
+    let mut boxed_sensor_net = create_sensor_net(SensorNetType::Serial2, sensor_net_args);
+    let sensor_net = &mut *boxed_sensor_net;
 
-    let sensor_net = &mut *boxed_sensor_network;
-    sensor_net.initialize();
+    sensor_net.init();
 
-    
 
     // Send a CONNECT message
     debug!("Sending CONNECT message");
