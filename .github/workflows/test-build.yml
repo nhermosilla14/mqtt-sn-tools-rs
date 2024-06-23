@@ -1,16 +1,16 @@
-name: Rust
+name: test-build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  test_and_build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -18,11 +18,5 @@ jobs:
       run: sudo apt-get install -y libudev-dev
     - name: Test
       run: cargo test --verbose
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install libudev-dev
-      run: sudo apt-get install -y libudev-dev
     - name: Build
-      run: cargo build --release --verbose
+      run: cargo build --verbose
