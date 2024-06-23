@@ -1,0 +1,71 @@
+name: build-release
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test_and_build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install libudev-dev
+      run: sudo apt-get install -y libudev-dev
+    - name: Test
+      run: cargo test --verbose
+    - name: Build
+      run: cargo build --verbose
+
+  upload-release:
+    needs: test_and_build
+    runs-on: ubuntu-latest
+    steps:
+    # Linux x86_64
+    - uses: actions/checkout@v4
+    - name: Install libudev-dev
+      run: sudo apt-get install -y libudev-dev
+    - name: Build
+      run: cargo build --release --verbose
+    - name: Remove debug symbols
+      run: rm target/release/*.d
+    - name: Create distribution directory
+      run: mkdir -p dist/linux/mqtt-sn-tools-rs-v${{ github.ref }}
+    - name: Copy binaries to distribution directory
+      run: cp target/release/mqtt-sn-* dist/linux/mqtt-sn-tools-rs-v${{ github.ref }}
+    - name: Create tarball (tar.zst) release for Linux x86_64
+      run: tar --zstd -cf dist/linux/mqtt-sn-tools-rs-v${{ github.ref }}-linux-x86_64.tar.zst -C dist/linux mqtt-sn-tools-rs-v${{ github.ref }}
+    # Windows x86_64
+    - name: Install mingw-w64
+      run: sudo apt-get install -y mingw-w64
+    - name: Build for Windows x86_64
+      run: cargo build --release --target x86_64-pc-windows-gnu --verbose
+    - name: Create distribution directory
+      run: mkdir -p dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}
+    - name: Copy binaries to distribution directory
+      run: cp target/release/mqtt-sn-*.exe dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}
+    - name: Create zip release for Windows x86_64
+      run: zip -r dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}
+    # Upload assets
+    - name: Upload release for Linux x86_64
+      uses: actions/upload-release@v1
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: dist/linux/mqtt-sn-tools-rs-v${{ github.ref }}-linux-x86_64.tar.zst
+        asset_name: mqtt-sn-tools-rs-v${{ github.ref }}-linux-x86_64.tar.zst
+        tag: ${{ github.ref }}
+        release_name: v${{ github.ref }}
+        release_notes: v${{ github.ref }}
+        overwrite: true
+    - name: Upload release for Windows x86_64
+      uses: actions/upload-release@v1
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip
+        asset_name: mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip
+        tag: ${{ github.ref }}
+        release_name: v${{ github.ref }}
+        release_notes: v${{ github.ref }}
+        overwrite: true
