@@ -50,22 +50,20 @@ jobs:
       run: zip -r dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}
     # Upload assets
     - name: Upload release for Linux x86_64
-      uses: actions/upload-release@v1
+      uses: svenstaro/upload-release-action@v2
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: dist/linux/mqtt-sn-tools-rs-v${{ github.ref }}-linux-x86_64.tar.zst
         asset_name: mqtt-sn-tools-rs-v${{ github.ref }}-linux-x86_64.tar.zst
         tag: ${{ github.ref }}
         release_name: v${{ github.ref }}
-        release_notes: v${{ github.ref }}
         overwrite: true
     - name: Upload release for Windows x86_64
-      uses: actions/upload-release@v1
+      uses: svenstaro/upload-release-action@v2
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: dist/windows/mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip
         asset_name: mqtt-sn-tools-rs-v${{ github.ref }}-windows-x86_64.zip
         tag: ${{ github.ref }}
         release_name: v${{ github.ref }}
-        release_notes: v${{ github.ref }}
         overwrite: true
